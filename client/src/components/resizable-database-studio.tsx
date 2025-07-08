@@ -1,5 +1,5 @@
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Connection } from "@shared/schema";
 import ConnectionSelector from "@/components/connection-selector";
@@ -127,24 +127,32 @@ LIMIT 500;`,
   };
 
   const handleTableClick = (tableName: string) => {
-    const newTab: QueryTab = {
-      id: `${tableName}-${Date.now()}`,
-      name: `${tableName}.sql`,
-      sql: `SELECT * FROM \`${tableName}\` LIMIT 100;`,
+    // Create a new query tab with table select statement
+    const newTabId = (queryTabs.length + 1).toString();
+    const newTab = {
+      id: newTabId,
+      name: `Query ${tableName}`,
+      sql: `SELECT * FROM ${tableName} LIMIT 100;`,
       connectionId: selectedConnectionId,
-      isActive: true,
+      isActive: false,
     };
+
+    setQueryTabs(prev => [...prev, newTab]);
     
-    setQueryTabs(prev => [...prev.map(tab => ({ ...tab, isActive: false })), newTab]);
-    setActiveTabId(newTab.id);
-    
-    // Set pagination state for this query
-    setPaginationState({
-      sql: newTab.sql,
-      page: 1,
-      pageSize: 100,
-    });
+    // Switch to query mode and then switch to the new tab
+    setViewMode('query');
+    setTimeout(() => {
+      handleTabSwitch(newTabId);
+    }, 100);
   };
+
+  // Safe view mode switching with potential Monaco cleanup
+  const handleViewModeSwitch = useCallback((mode: 'query' | 'erd') => {
+    // Small delay to allow any pending Monaco operations to complete
+    setTimeout(() => {
+      setViewMode(mode);
+    }, 50);
+  }, []);
 
   const updateTabSql = (tabId: string, sql: string) => {
     setQueryTabs(prev =>
@@ -177,7 +185,7 @@ LIMIT 500;`,
             <Button
               variant={viewMode === 'query' ? "default" : "ghost"}
               size="sm"
-              onClick={() => setViewMode('query')}
+              onClick={() => handleViewModeSwitch('query')}
               className="h-8"
             >
               <Terminal className="w-4 h-4 mr-2" />
@@ -186,7 +194,7 @@ LIMIT 500;`,
             <Button
               variant={viewMode === 'erd' ? "default" : "ghost"}
               size="sm"
-              onClick={() => setViewMode('erd')}
+              onClick={() => handleViewModeSwitch('erd')}
               className="h-8"
             >
               <GitBranch className="w-4 h-4 mr-2" />

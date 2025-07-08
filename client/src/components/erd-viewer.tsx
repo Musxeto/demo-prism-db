@@ -17,54 +17,72 @@ import ReactFlow, {
 import dagre from 'dagre';
 import { DatabaseRelationships } from '../../../shared/schema';
 import { Button } from './ui/button';
-import { ZoomIn, ZoomOut, Maximize, RotateCcw, Search } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize, RotateCcw, Search, RefreshCw } from 'lucide-react';
 import { Input } from './ui/input';
 import { useRelationships } from '../hooks/use-relationships';
 import 'reactflow/dist/style.css';
 
 // Custom Table Node Component
-const TableNode = ({ data }: { data: any }) => {
+const TableNode = ({ data, selected }: { data: any, selected?: boolean }) => {
   const { table, onTableClick, isHighlighted } = data;
   
   return (
     <div 
-      className={`bg-white border-2 rounded-lg shadow-lg min-w-[200px] relative ${
-        isHighlighted ? 'border-blue-500 shadow-blue-200' : 'border-gray-300'
+      className={`bg-white border-2 rounded-lg shadow-lg min-w-[200px] relative transition-all duration-200 ${
+        selected 
+          ? 'border-red-500 shadow-red-200 shadow-lg scale-105' 
+          : isHighlighted 
+          ? 'border-blue-500 shadow-blue-200' 
+          : 'border-gray-300'
       }`}
     >
+      {selected && (
+        <div className="absolute -top-6 left-0 right-0 text-center">
+          <span className="bg-red-500 text-white text-xs px-2 py-1 rounded">
+            Selected - Press Delete to remove
+          </span>
+        </div>
+      )}
+      
       {/* Connection Handles */}
       <Handle
         type="target"
         position={Position.Left}
         id="left"
-        style={{ background: '#3B82F6', width: 8, height: 8 }}
+        style={{ background: selected ? '#EF4444' : '#3B82F6', width: 8, height: 8 }}
       />
       <Handle
         type="source" 
         position={Position.Right}
         id="right"
-        style={{ background: '#3B82F6', width: 8, height: 8 }}
+        style={{ background: selected ? '#EF4444' : '#3B82F6', width: 8, height: 8 }}
       />
       <Handle
         type="target"
         position={Position.Top}
         id="top"
-        style={{ background: '#3B82F6', width: 8, height: 8 }}
+        style={{ background: selected ? '#EF4444' : '#3B82F6', width: 8, height: 8 }}
       />
       <Handle
         type="source"
         position={Position.Bottom}
         id="bottom"
-        style={{ background: '#3B82F6', width: 8, height: 8 }}
+        style={{ background: selected ? '#EF4444' : '#3B82F6', width: 8, height: 8 }}
       />
       
       {/* Table Header */}
       <div 
-        className="bg-slate-800 text-white px-3 py-2 rounded-t-lg cursor-pointer hover:bg-slate-700 transition-colors"
+        className={`px-3 py-2 rounded-t-lg cursor-pointer transition-colors ${
+          selected 
+            ? 'bg-red-600 text-white hover:bg-red-500' 
+            : 'bg-slate-800 text-white hover:bg-slate-700'
+        }`}
         onClick={() => onTableClick?.(table.name)}
       >
         <div className="font-semibold text-sm">{table.name}</div>
-        <div className="text-xs text-slate-300">{table.rowCount} rows</div>
+        <div className={`text-xs ${selected ? 'text-red-100' : 'text-slate-300'}`}>
+          {table.rowCount} rows
+        </div>
       </div>
       
       {/* Columns */}
@@ -168,6 +186,49 @@ export default function ERDViewer({ connectionId, onTableClick }: ERDViewerProps
     (params: Connection) => setEdges((eds) => addEdge(params, eds)),
     [setEdges]
   );
+
+  // Handle edge deletion
+  const onEdgeDelete = useCallback((edgesToDelete: Edge[]) => {
+    setEdges((edges) => edges.filter((edge) => !edgesToDelete.some((edgeToDelete) => edgeToDelete.id === edge.id)));
+  }, [setEdges]);
+
+  // Handle node deletion
+  const onNodeDelete = useCallback((nodesToDelete: Node[]) => {
+    const nodeIdsToDelete = nodesToDelete.map(node => node.id);
+    
+    // Remove nodes
+    setNodes((nodes) => nodes.filter((node) => !nodeIdsToDelete.includes(node.id)));
+    
+    // Remove edges connected to deleted nodes
+    setEdges((edges) => edges.filter((edge) => 
+      !nodeIdsToDelete.includes(edge.source) && !nodeIdsToDelete.includes(edge.target)
+    ));
+  }, [setNodes, setEdges]);
+
+  // Handle key press for deletion
+  const onKeyDown = useCallback((event: KeyboardEvent) => {
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      // Get selected nodes and edges
+      const selectedNodes = nodes.filter(node => node.selected);
+      const selectedEdges = edges.filter(edge => edge.selected);
+      
+      if (selectedNodes.length > 0) {
+        onNodeDelete(selectedNodes);
+      }
+      
+      if (selectedEdges.length > 0) {
+        onEdgeDelete(selectedEdges);
+      }
+    }
+  }, [nodes, edges, onNodeDelete, onEdgeDelete]);
+
+  // Add keyboard event listener
+  useEffect(() => {
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [onKeyDown]);
 
   // Convert relationships data to React Flow nodes and edges
   useEffect(() => {
@@ -298,6 +359,66 @@ export default function ERDViewer({ connectionId, onTableClick }: ERDViewerProps
     setLayoutDirection(prev => prev === 'TB' ? 'LR' : 'TB');
   };
 
+  const resetERD = () => {
+    // Recreate all nodes and edges from original data
+    if (!relationships?.tables) return;
+
+    const initialNodes: Node[] = relationships.tables.map((table, index) => ({
+      id: table.name,
+      type: 'table',
+      position: { x: (index % 4) * 250, y: Math.floor(index / 4) * 200 },
+      data: { 
+        table,
+        onTableClick,
+        isHighlighted: false
+      },
+    }));
+
+    const initialEdges: Edge[] = relationships.relationships?.map((rel, index) => ({
+      id: `edge-${index}`,
+      source: rel.fromTable,
+      target: rel.toTable,
+      label: `${rel.fromColumn} → ${rel.toColumn}`,
+      type: 'smoothstep',
+      animated: false,
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 25,
+        height: 25,
+        color: '#3B82F6',
+      },
+      style: {
+        strokeWidth: 3,
+        stroke: '#3B82F6',
+      },
+      labelStyle: {
+        fontSize: '12px',
+        fontWeight: 600,
+        fill: '#1F2937',
+        backgroundColor: '#FFFFFF',
+      },
+      labelBgStyle: {
+        fill: '#FFFFFF',
+        fillOpacity: 1,
+        stroke: '#E5E7EB',
+        strokeWidth: 1,
+        borderRadius: '4px',
+      },
+      sourceHandle: 'right',
+      targetHandle: 'left',
+    })) || [];
+
+    // Apply layout
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+      initialNodes,
+      initialEdges,
+      layoutDirection
+    );
+
+    setNodes(layoutedNodes);
+    setEdges(layoutedEdges);
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -341,6 +462,11 @@ export default function ERDViewer({ connectionId, onTableClick }: ERDViewerProps
               Debug: {nodes.length} nodes, {edges.length} edges
             </div>
           )}
+          
+          {/* Instructions */}
+          <div className="text-xs text-slate-400">
+            Select items and press Delete/Backspace to remove
+          </div>
         </div>
         
         <div className="flex items-center space-x-2">
@@ -372,6 +498,15 @@ export default function ERDViewer({ connectionId, onTableClick }: ERDViewerProps
           >
             <Maximize className="w-4 h-4" />
           </Button>
+          
+          <Button 
+            onClick={resetERD} 
+            variant="outline" 
+            size="sm"
+            title="Reset ERD - restore all tables and relationships"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </Button>
         </div>
       </div>
 
@@ -383,6 +518,8 @@ export default function ERDViewer({ connectionId, onTableClick }: ERDViewerProps
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onNodesDelete={onNodeDelete}
+          onEdgesDelete={onEdgeDelete}
           nodeTypes={nodeTypes}
           connectionMode={ConnectionMode.Loose}
           fitView
@@ -395,6 +532,13 @@ export default function ERDViewer({ connectionId, onTableClick }: ERDViewerProps
           }}
           // Ensure edges are rendered above nodes
           elevateEdgesOnSelect={true}
+          // Enable selection and interaction
+          nodesConnectable={true}
+          nodesDraggable={true}
+          edgesFocusable={true}
+          selectNodesOnDrag={false}
+          panOnDrag={true}
+          deleteKeyCode={['Delete', 'Backspace']}
         >
           <Controls 
             showZoom={true}

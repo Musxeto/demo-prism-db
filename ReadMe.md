@@ -2,6 +2,89 @@
 
 A modern, full-stack database management platform built with React, FastAPI, and MySQL. This application provides a comprehensive interface for managing database connections, browsing schemas, executing queries, and analyzing results.
 
+## 🚀 Quick Start Guide
+
+### Prerequisites
+Before running this application, make sure you have:
+- **Node.js** (v18 or higher) - [Download here](https://nodejs.org/)
+- **Python** (v3.8 or higher) - [Download here](https://python.org/)
+- **MySQL Server** - [Download here](https://dev.mysql.com/downloads/mysql/)
+
+### Step-by-Step Setup
+
+#### 1. Clone the Repository
+```bash
+git clone <repository-url>
+cd MySqlReactFastApi
+```
+
+#### 2. Setup the Backend (FastAPI Server)
+```bash
+# Navigate to server directory
+cd server
+
+# Create and activate virtual environment (recommended)
+python -m venv venv
+
+# Activate virtual environment
+# On Windows:
+venv\Scripts\activate
+# On macOS/Linux:
+# source venv/bin/activate
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Start the FastAPI server (runs on port 5000)
+python main.py
+```
+The backend server will start at `http://localhost:5000`
+
+#### 3. Setup the Frontend (React App)
+Open a new terminal window/tab and run:
+```bash
+
+cd ..
+
+npm install
+
+npm run dev
+```
+The frontend will start at `http://localhost:5173`
+
+#### 4. Setup Your MySQL Database (Optional)
+If you want to test with sample data:
+```bash
+# Import the sample database (optional)
+mysql -u root -p < sample_database_with_relationships.sql
+```
+
+### 🎯 Access the Application
+1. **Frontend UI**: Open `http://localhost:5173` in your browser
+2. **Backend API**: `http://localhost:5000` (API documentation at `/docs`)
+
+### 🔧 Development Commands
+```bash
+# Frontend development
+npm run dev          # Start development server
+npm run build        # Build for production
+npm run preview      # Preview production build
+
+# Backend development
+cd server
+# Activate virtual environment first
+venv\Scripts\activate     # Windows
+# source venv/bin/activate  # macOS/Linux
+python main.py            # Start FastAPI server
+python clear_db.py        # Clear application database (if needed)
+```
+
+### 🐛 Troubleshooting
+- **Port conflicts**: If port 5173 or 5000 is busy, the apps will automatically use the next available port
+- **MySQL connection issues**: Ensure MySQL server is running and you have the correct credentials
+- **Dependencies issues**: Delete `node_modules` and run `npm install` again for frontend, or recreate virtual environment for Python
+- **CORS issues**: The backend is configured to allow localhost:5173 - make sure both servers are running
+
 ## 🚀 Features Completed
 
 ### 🔗 Connection Management
@@ -107,31 +190,17 @@ A modern, full-stack database management platform built with React, FastAPI, and
 - **Error Sanitization**: Safe error message handling
 - **Connection Security**: Secure database credential storage
 
-## 🚦 Getting Started
+## � What You Can Do
 
-### Prerequisites
-- Node.js (v18 or higher)
-- Python (v3.8 or higher)
-- MySQL database server
-
-### Installation
-
-1. **Frontend Setup**:
-   ```bash
-   npm install
-   npm run dev
-   ```
-
-2. **Backend Setup**:
-   ```bash
-   cd server
-   pip install -r requirements.txt
-   python main.py
-   ```
-
-3. **Access the Application**:
-   - Frontend: http://localhost:5173
-   - Backend API: http://localhost:5000
+Once both servers are running, you can:
+- **Create database connections** to your MySQL databases
+- **Browse database schemas** with an interactive tree view
+- **Write and execute SQL queries** with syntax highlighting
+- **View query results** in a professional data table
+- **Export results** to CSV or copy to clipboard
+- **Manage multiple query tabs** for different tasks
+- **Switch between database connections** seamlessly
+- **View database relationships** in an interactive ERD diagram
 
 ## 🔮 Current Status
 
