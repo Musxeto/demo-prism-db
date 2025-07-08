@@ -114,6 +114,18 @@ export interface DatabaseSchemaResponse {
   relationships: RelationshipSchema[];
 }
 
+export interface DatabaseRelationships {
+  database: string;
+  tables: DatabaseTable[];
+  relationships: Array<{
+    fromTable: string;
+    fromColumn: string;
+    toTable: string;
+    toColumn: string;
+    type: string;
+  }>;
+}
+
 export interface ConnectionTest {
   host: string;
   port: number;

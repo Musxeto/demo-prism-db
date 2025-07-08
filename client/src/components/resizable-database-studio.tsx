@@ -7,8 +7,9 @@ import SchemaBrowser from "@/components/schema-browser";
 import QueryEditor from "@/components/query-editor";
 import ResultsPanel from "@/components/results-panel";
 import ConnectionModal from "@/components/connection-modal";
+import ERDViewer from "./erd-viewer";
 import { Button } from "@/components/ui/button";
-import { Database, Plus, User, Maximize2, Minimize2 } from "lucide-react";
+import { Database, Plus, User, Maximize2, Minimize2, GitBranch, Terminal } from "lucide-react";
 
 interface QueryTab {
   id: string;
@@ -30,6 +31,7 @@ export default function ResizableDatabaseStudio() {
   const [isSchemaExpanded, setIsSchemaExpanded] = useState(false);
   const [isResultsExpanded, setIsResultsExpanded] = useState(false);
   const [paginationState, setPaginationState] = useState<PaginationState | null>(null);
+  const [viewMode, setViewMode] = useState<'query' | 'erd'>('query');
   const queryClient = useQueryClient();
   const [queryTabs, setQueryTabs] = useState<QueryTab[]>([
     {
@@ -170,6 +172,28 @@ LIMIT 500;`,
           </div>
         </div>
         <div className="flex items-center space-x-4">
+          {/* View Mode Toggle */}
+          <div className="flex items-center space-x-1 bg-slate-100 rounded-lg p-1">
+            <Button
+              variant={viewMode === 'query' ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode('query')}
+              className="h-8"
+            >
+              <Terminal className="w-4 h-4 mr-2" />
+              Query
+            </Button>
+            <Button
+              variant={viewMode === 'erd' ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode('erd')}
+              className="h-8"
+            >
+              <GitBranch className="w-4 h-4 mr-2" />
+              Relationships
+            </Button>
+          </div>
+          
           <Button onClick={() => setIsConnectionModalOpen(true)}>
             <Plus className="w-4 h-4 mr-2" />
             New Connection
@@ -227,87 +251,95 @@ LIMIT 500;`,
 
           {/* Main Content Area */}
           <Panel defaultSize={80} minSize={40}>
-            <PanelGroup direction="vertical">
-              {/* Query Editor Panel */}
-              <Panel defaultSize={isResultsExpanded ? 30 : 60} minSize={25}>
-                <div className="h-full bg-white flex flex-col">
-                  {/* Tab Bar */}
-                  <div className="bg-white border-b border-slate-200 px-6 py-2">
-                    <div className="flex items-center space-x-1">
-                      {queryTabs.map((tab) => (
-                        <div
-                          key={tab.id}
-                          className={`flex items-center px-3 py-2 rounded-lg text-sm font-medium border-r border-slate-200 cursor-pointer ${
-                            tab.id === activeTabId
-                              ? "bg-slate-100 text-slate-700"
-                              : "text-slate-500 hover:bg-slate-50 hover:text-slate-600"
-                          }`}
-                          onClick={() => handleTabSwitch(tab.id)}
-                        >
-                          <Database className="w-4 h-4 mr-2 text-slate-500" />
-                          <span>{tab.name}</span>
-                          <button
-                            className="ml-2 text-slate-400 hover:text-slate-600"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleTabClose(tab.id);
-                            }}
+            {viewMode === 'query' ? (
+              <PanelGroup direction="vertical">
+                {/* Query Editor Panel */}
+                <Panel defaultSize={isResultsExpanded ? 30 : 60} minSize={25}>
+                  <div className="h-full bg-white flex flex-col">
+                    {/* Tab Bar */}
+                    <div className="bg-white border-b border-slate-200 px-6 py-2">
+                      <div className="flex items-center space-x-1">
+                        {queryTabs.map((tab) => (
+                          <div
+                            key={tab.id}
+                            className={`flex items-center px-3 py-2 rounded-lg text-sm font-medium border-r border-slate-200 cursor-pointer ${
+                              tab.id === activeTabId
+                                ? "bg-slate-100 text-slate-700"
+                                : "text-slate-500 hover:bg-slate-50 hover:text-slate-600"
+                            }`}
+                            onClick={() => handleTabSwitch(tab.id)}
                           >
-                            ×
-                          </button>
-                        </div>
-                      ))}
-                      <button
-                        className="flex items-center px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-50 hover:text-slate-600"
-                        onClick={handleNewQuery}
-                      >
-                        <Plus className="w-4 h-4 mr-1" />
-                        New Query
-                      </button>
+                            <Database className="w-4 h-4 mr-2 text-slate-500" />
+                            <span>{tab.name}</span>
+                            <button
+                              className="ml-2 text-slate-400 hover:text-slate-600"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleTabClose(tab.id);
+                              }}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                        <button
+                          className="flex items-center px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+                          onClick={handleNewQuery}
+                        >
+                          <Plus className="w-4 h-4 mr-1" />
+                          New Query
+                        </button>
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Query Editor */}
-                  {activeTab && (
-                    <QueryEditor
-                      tab={activeTab}
-                      onSqlChange={(sql) => updateTabSql(activeTab.id, sql)}
-                      onQueryExecuted={handleQueryExecuted}
+                    {/* Query Editor */}
+                    {activeTab && (
+                      <QueryEditor
+                        tab={activeTab}
+                        onSqlChange={(sql) => updateTabSql(activeTab.id, sql)}
+                        onQueryExecuted={handleQueryExecuted}
+                      />
+                    )}
+                  </div>
+                </Panel>
+
+                <PanelResizeHandle className="h-2 bg-slate-100 hover:bg-slate-200 transition-colors" />
+
+                {/* Results Panel */}
+                <Panel defaultSize={isResultsExpanded ? 70 : 40} minSize={20}>
+                  <div className="h-full bg-white">
+                    {/* Results Header with Expand/Collapse */}
+                    <div className="px-6 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+                      <h3 className="text-sm font-medium text-slate-700">Query Results</h3>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setIsResultsExpanded(!isResultsExpanded)}
+                        className="h-6 w-6 p-0"
+                      >
+                        {isResultsExpanded ? (
+                          <Minimize2 className="w-4 h-4" />
+                        ) : (
+                          <Maximize2 className="w-4 h-4" />
+                        )}
+                      </Button>
+                    </div>
+                    
+                    <ResultsPanel 
+                      connectionId={selectedConnectionId} 
+                      paginationState={paginationState}
+                      onPaginationChange={setPaginationState}
                     />
-                  )}
-                </div>
-              </Panel>
-
-              <PanelResizeHandle className="h-2 bg-slate-100 hover:bg-slate-200 transition-colors" />
-
-              {/* Results Panel */}
-              <Panel defaultSize={isResultsExpanded ? 70 : 40} minSize={20}>
-                <div className="h-full bg-white">
-                  {/* Results Header with Expand/Collapse */}
-                  <div className="px-6 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-                    <h3 className="text-sm font-medium text-slate-700">Query Results</h3>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setIsResultsExpanded(!isResultsExpanded)}
-                      className="h-6 w-6 p-0"
-                    >
-                      {isResultsExpanded ? (
-                        <Minimize2 className="w-4 h-4" />
-                      ) : (
-                        <Maximize2 className="w-4 h-4" />
-                      )}
-                    </Button>
                   </div>
-                  
-                  <ResultsPanel 
-                    connectionId={selectedConnectionId} 
-                    paginationState={paginationState}
-                    onPaginationChange={setPaginationState}
-                  />
-                </div>
-              </Panel>
-            </PanelGroup>
+                </Panel>
+              </PanelGroup>
+            ) : (
+              /* ERD View */
+              <ERDViewer 
+                connectionId={selectedConnectionId}
+                onTableClick={handleTableClick}
+              />
+            )}
           </Panel>
         </PanelGroup>
       </div>

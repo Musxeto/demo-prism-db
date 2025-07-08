@@ -14,10 +14,11 @@ import ReactFlow, {
   Position,
 } from 'reactflow';
 import dagre from 'dagre';
-import { DatabaseRelationships } from '@shared/schema';
+import { DatabaseRelationships } from '../../../shared/schema';
 import { Button } from '@/components/ui/button';
 import { ZoomIn, ZoomOut, Maximize, RotateCcw, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { useRelationships } from '../hooks/use-relationships';
 import 'reactflow/dist/style.css';
 
 // Custom Table Node Component
@@ -75,7 +76,6 @@ const nodeTypes = {
 
 interface ERDViewerProps {
   connectionId: number;
-  relationships?: DatabaseRelationships;
   onTableClick?: (tableName: string) => void;
 }
 
@@ -108,11 +108,14 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => 
   return { nodes, edges };
 };
 
-export default function ERDViewer({ connectionId, relationships, onTableClick }: ERDViewerProps) {
+export default function ERDViewer({ connectionId, onTableClick }: ERDViewerProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [layoutDirection, setLayoutDirection] = useState<'TB' | 'LR'>('TB');
+
+  // Fetch relationships data
+  const { data: relationships, isLoading, error } = useRelationships(connectionId);
 
   // Filter and highlight nodes based on search
   const filteredAndHighlightedNodes = nodes.map(node => ({
@@ -193,10 +196,26 @@ export default function ERDViewer({ connectionId, relationships, onTableClick }:
     setLayoutDirection(prev => prev === 'TB' ? 'LR' : 'TB');
   };
 
-  if (!relationships) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-slate-500">Loading schema relationships...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-red-500">Error loading relationships: {error.message}</div>
+      </div>
+    );
+  }
+
+  if (!relationships) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-slate-500">No relationship data available</div>
       </div>
     );
   }

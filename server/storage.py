@@ -326,12 +326,12 @@ def get_relationships(db: Session, connection_id: int):
             # Get column information with foreign key details
             cursor.execute(f"""
                 SELECT 
-                    COLUMN_NAME,
-                    DATA_TYPE,
-                    IS_NULLABLE,
-                    COLUMN_KEY,
-                    REFERENCED_TABLE_NAME,
-                    REFERENCED_COLUMN_NAME
+                    c.COLUMN_NAME,
+                    c.DATA_TYPE,
+                    c.IS_NULLABLE,
+                    c.COLUMN_KEY,
+                    kcu.REFERENCED_TABLE_NAME,
+                    kcu.REFERENCED_COLUMN_NAME
                 FROM INFORMATION_SCHEMA.COLUMNS c
                 LEFT JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu 
                     ON c.TABLE_SCHEMA = kcu.TABLE_SCHEMA 
