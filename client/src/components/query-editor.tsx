@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { QueryResult } from "@shared/schema";
 import { Button } from "@/components/ui/button";
-import { Play, FileText } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Play, FileText, Loader2 } from "lucide-react";
 import MonacoEditor from "@/components/ui/monaco-editor";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -18,25 +19,40 @@ interface QueryTab {
 interface QueryEditorProps {
   tab: QueryTab;
   onSqlChange: (sql: string) => void;
+  onQueryExecuted: (sql: string, page: number, pageSize: number) => void;
 }
 
-export default function QueryEditor({ tab, onSqlChange }: QueryEditorProps) {
+export default function QueryEditor({ tab, onSqlChange, onQueryExecuted }: QueryEditorProps) {
   const [isExecuting, setIsExecuting] = useState(false);
   const [lastExecutionTime, setLastExecutionTime] = useState<number | null>(null);
+  const [pageSize, setPageSize] = useState(100);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const executeQueryMutation = useMutation({
-    mutationFn: async ({ connectionId, sql }: { connectionId: number; sql: string }) => {
-      const response = await apiRequest("POST", `/api/connections/${connectionId}/query`, { sql });
+    mutationFn: async ({ connectionId, sql, page, pageSize }: { 
+      connectionId: number; 
+      sql: string; 
+      page: number; 
+      pageSize: number; 
+    }) => {
+      const response = await apiRequest("POST", `/api/connections/${connectionId}/query`, { 
+        sql, 
+        page, 
+        pageSize 
+      });
       return response.json();
     },
     onSuccess: (result: QueryResult) => {
-      setLastExecutionTime(result.executionTime);
+      setLastExecutionTime(result.executionTimeMs);
       queryClient.setQueryData(["query-result", tab.connectionId], result);
+      
+      // Notify parent component about the executed query for pagination
+      onQueryExecuted(tab.sql, 1, pageSize);
+      
       toast({
         title: "Query executed successfully",
-        description: `${result.rowCount} rows returned in ${result.executionTime}ms`,
+        description: `${result.rowCount} rows returned in ${result.executionTimeMs}ms`,
       });
     },
     onError: (error) => {
@@ -65,6 +81,8 @@ export default function QueryEditor({ tab, onSqlChange }: QueryEditorProps) {
     executeQueryMutation.mutate({
       connectionId: tab.connectionId,
       sql: tab.sql,
+      page: 1,
+      pageSize: pageSize,
     });
   };
 
@@ -105,6 +123,26 @@ export default function QueryEditor({ tab, onSqlChange }: QueryEditorProps) {
           )}
         </div>
         <div className="flex items-center space-x-3">
+          {/* Page Size Selector */}
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-slate-600">Page size:</span>
+            <Select 
+              value={pageSize.toString()} 
+              onValueChange={(value) => setPageSize(parseInt(value))}
+            >
+              <SelectTrigger className="w-20 h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="25">25</SelectItem>
+                <SelectItem value="50">50</SelectItem>
+                <SelectItem value="100">100</SelectItem>
+                <SelectItem value="250">250</SelectItem>
+                <SelectItem value="500">500</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
           <Button variant="outline" size="sm" onClick={handleFormatSql}>
             <FileText className="w-4 h-4 mr-2" />
             Format SQL
@@ -114,8 +152,17 @@ export default function QueryEditor({ tab, onSqlChange }: QueryEditorProps) {
             onClick={handleExecuteQuery}
             disabled={isExecuting}
           >
-            <Play className="w-4 h-4 mr-2" />
-            {isExecuting ? "Running..." : "Run Query"}
+            {isExecuting ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Running...
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4 mr-2" />
+                Run Query
+              </>
+            )}
           </Button>
         </div>
       </div>

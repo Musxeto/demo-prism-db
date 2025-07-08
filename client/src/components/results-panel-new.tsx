@@ -283,7 +283,7 @@ export default function ResultsPanel({ connectionId, paginationState, onPaginati
             {result.columns && result.rows ? (
               <DataTable 
                 columns={result.columns} 
-                rows={result.rows} 
+                data={result.rows} 
               />
             ) : (
               <div className="flex items-center justify-center h-full text-slate-500">

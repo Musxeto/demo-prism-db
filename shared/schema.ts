@@ -47,6 +47,14 @@ export interface DatabaseTable {
   name: string;
   rowCount: number;
   columns: DatabaseColumn[];
+  primaryKeys?: string[];
+  foreignKeys?: Array<{
+    column: string;
+    references: {
+      table: string;
+      column: string;
+    };
+  }>;
 }
 
 export interface DatabaseColumn {
@@ -55,11 +63,61 @@ export interface DatabaseColumn {
   nullable: boolean;
   isPrimaryKey: boolean;
   isForeignKey: boolean;
+  references?: {
+    table: string;
+    column: string;
+  };
 }
 
 export interface QueryResult {
-  columns: { name: string; type: string }[];
-  rows: any[][];
-  executionTime: number;
+  columns?: Array<{ name: string; type: string }>;
+  rows?: any[][];
+  rowCount?: number;
+  totalRows?: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
+  executionTimeMs: number;
+  message?: string;
+}
+
+export interface ColumnSchema {
+  name: string;
+  type: string;
+  nullable: boolean;
+  isPrimaryKey: boolean;
+  isForeignKey: boolean;
+  references?: {
+    table: string;
+    column: string;
+  };
+}
+
+export interface TableSchema {
+  tableName: string;
   rowCount: number;
+  columns: ColumnSchema[];
+  sampleRows: Record<string, any>[];
+}
+
+export interface RelationshipSchema {
+  fromTable: string;
+  fromColumn: string;
+  toTable: string;
+  toColumn: string;
+  type: string;
+}
+
+export interface DatabaseSchemaResponse {
+  database: string;
+  tables: TableSchema[];
+  relationships: RelationshipSchema[];
+}
+
+export interface ConnectionTest {
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  password: string;
 }

@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import DataTable from "@/components/ui/data-table";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { useState, useEffect } from "react";
 
 interface PaginationState {
   sql: string;
@@ -169,30 +170,30 @@ export default function ResultsPanel({ connectionId, paginationState, onPaginati
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'query-results.csv';
+    a.download = 'query_results.csv';
     a.click();
     window.URL.revokeObjectURL(url);
     
     toast({
-      title: "CSV exported",
-      description: "Query results exported to CSV file",
+      title: "Export successful",
+      description: "Query results exported to CSV",
     });
   };
 
-  const handleCopyToClipboard = async () => {
+  const handleCopyResults = async () => {
     if (!result || !result.columns || !result.rows) return;
 
+    const headers = result.columns.map(col => col.name).join('\t');
+    const rows = result.rows.map(row => 
+      row.map(cell => cell === null || cell === undefined ? '' : String(cell)).join('\t')
+    ).join('\n');
+    const text = `${headers}\n${rows}`;
+    
     try {
-      const headers = result.columns.map(col => col.name).join('\t');
-      const rows = result.rows.map(row => 
-        row.map(cell => cell === null || cell === undefined ? '' : String(cell)).join('\t')
-      ).join('\n');
-      const text = `${headers}\n${rows}`;
-      
       await navigator.clipboard.writeText(text);
       toast({
         title: "Copied to clipboard",
-        description: "Query results copied to clipboard",
+        description: "Query results copied as tab-separated values",
       });
     } catch (error) {
       toast({
@@ -203,123 +204,129 @@ export default function ResultsPanel({ connectionId, paginationState, onPaginati
     }
   };
 
+  const getUserSegmentBadge = (segment: string) => {
+    const variants = {
+      "Power User": "bg-purple-100 text-purple-800",
+      "Regular User": "bg-blue-100 text-blue-800",
+      "Light User": "bg-yellow-100 text-yellow-800",
+      "No Orders": "bg-gray-100 text-gray-800",
+    };
+    
+    return (
+      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${variants[segment as keyof typeof variants] || "bg-gray-100 text-gray-800"}`}>
+        {segment}
+      </span>
+    );
+  };
+
   return (
-    <div className="h-full flex flex-col bg-white">
-      {result ? (
-        <>
-          {/* Results Header with Pagination Controls */}
-          <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50">
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center text-sm text-slate-600">
-                <CheckCircle className="w-4 h-4 mr-2 text-green-600" />
-                {result.rowCount !== undefined ? (
-                  <>
-                    <span>{result.rowCount} rows</span>
-                    {result.totalRows && result.totalRows > result.rowCount && (
-                      <span className="ml-2">of {result.totalRows} total</span>
-                    )}
-                  </>
-                ) : (
-                  <span>{result.message}</span>
-                )}
-                {result.executionTimeMs && (
-                  <span className="ml-2">• {result.executionTimeMs}ms</span>
-                )}
-              </div>
-              
-              {/* Page Size Selector */}
-              {result.totalPages && result.totalPages > 1 && (
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm text-slate-600">Page size:</span>
-                  <Select 
-                    value={paginationState?.pageSize?.toString() || "100"} 
-                    onValueChange={(value) => handlePageSizeChange(parseInt(value))}
-                  >
-                    <SelectTrigger className="w-20 h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="25">25</SelectItem>
-                      <SelectItem value="50">50</SelectItem>
-                      <SelectItem value="100">100</SelectItem>
-                      <SelectItem value="250">250</SelectItem>
-                      <SelectItem value="500">500</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+    <div className="bg-white border-t border-slate-200 h-96">
+      {/* Results Header */}
+      <div className="px-6 py-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+        <div className="flex items-center space-x-6">
+          <h3 className="text-sm font-medium text-slate-700">Query Results</h3>
+          {result && (
+            <div className="flex items-center space-x-4 text-sm text-slate-500">
+              <span className="flex items-center">
+                <CheckCircle className="w-4 h-4 mr-1 text-green-500" />
+                Executed successfully
+              </span>
+              <span>{result.executionTimeMs}ms</span>
+              {result.rowCount !== undefined && (
+                <span>{result.rowCount} rows returned</span>
               )}
+              {result.message && (
+                <span>{result.message}</span>
+              )}
+              <span>Last run: {new Date().toLocaleTimeString()}</span>
             </div>
-            
-            <div className="flex items-center space-x-2">
-              {/* Pagination Controls */}
-              {renderPaginationControls()}
-              
-              {/* Export Actions */}
-              <div className="flex items-center space-x-2 ml-4">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleExportCsv}
-                  disabled={!result.rows || result.rows.length === 0}
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Export CSV
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleCopyToClipboard}
-                  disabled={!result.rows || result.rows.length === 0}
-                >
-                  <Copy className="w-4 h-4 mr-2" />
-                  Copy
-                </Button>
+          )}
+        </div>
+        {result && result.columns && result.rows && (
+          <div className="flex items-center space-x-2">
+            <Button variant="outline" size="sm" onClick={handleExportCsv}>
+              <Download className="w-4 h-4 mr-1" />
+              Export CSV
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleCopyResults}>
+              <Copy className="w-4 h-4 mr-1" />
+              Copy
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Data Grid */}
+      <div className="flex-1 overflow-auto">
+        {result ? (
+          result.columns && result.rows ? (
+            <DataTable
+              columns={result.columns}
+              rows={result.rows}
+              renderCell={(value, column, rowIndex) => {
+                if (column.name === "user_segment") {
+                  return getUserSegmentBadge(value);
+                }
+                if (column.name === "total_spent" && typeof value === "number") {
+                  return <span className="text-green-600 font-medium">${value.toFixed(2)}</span>;
+                }
+                if (column.name === "id" || column.name === "total_orders") {
+                  return <span className="text-slate-900">{value}</span>;
+                }
+                if (column.name === "username") {
+                  return <span className="text-slate-900 font-medium">{value}</span>;
+                }
+                // Handle null values
+                if (value === null || value === undefined) {
+                  return <span className="text-slate-400 italic">NULL</span>;
+                }
+                return <span className="text-slate-600">{value}</span>;
+              }}
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full text-slate-500">
+              <div className="text-center">
+                <CheckCircle className="w-12 h-12 mx-auto text-green-500 mb-3" />
+                <p className="text-slate-600">{result.message || "Query executed successfully"}</p>
+                <p className="text-sm text-slate-500 mt-1">
+                  Executed in {result.executionTimeMs}ms
+                </p>
               </div>
             </div>
+          )
+        ) : (
+          <div className="flex items-center justify-center h-full text-slate-500">
+            Execute a query to see results here
           </div>
+        )}
+      </div>
 
-          {/* Results Table */}
-          <div className="flex-1 overflow-hidden">
-            {result.columns && result.rows ? (
-              <DataTable 
-                columns={result.columns} 
-                rows={result.rows} 
-              />
-            ) : (
-              <div className="flex items-center justify-center h-full text-slate-500">
-                <div className="text-center">
-                  <CheckCircle className="w-12 h-12 mx-auto text-green-500 mb-3" />
-                  <p className="text-slate-600">{result.message || "Query executed successfully"}</p>
-                  <p className="text-sm text-slate-500 mt-1">
-                    Executed in {result.executionTimeMs}ms
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Bottom Pagination Info */}
-          {result.totalRows && result.totalPages && result.totalPages > 1 && (
-            <div className="px-4 py-2 border-t border-slate-200 bg-slate-50">
-              <div className="text-sm text-slate-500">
+      {/* Pagination */}
+      {result && result.rows && (
+        <div className="px-6 py-3 border-t border-slate-200 flex items-center justify-between bg-slate-50">
+          <div className="text-sm text-slate-500">
+            {result.totalRows ? (
+              <>
                 Showing <span className="font-medium">{((result.page || 1) - 1) * (result.pageSize || 100) + 1}</span> to{" "}
                 <span className="font-medium">
                   {Math.min((result.page || 1) * (result.pageSize || 100), result.totalRows)}
                 </span> of{" "}
                 <span className="font-medium">{result.totalRows.toLocaleString()}</span> results
-                <span className="ml-2">
-                  (Page {result.page} of {result.totalPages})
-                </span>
-              </div>
-            </div>
-          )}
-        </>
-      ) : (
-        <div className="flex items-center justify-center h-full text-slate-500">
-          <div className="text-center">
-            <div className="text-lg mb-2">No query results</div>
-            <div className="text-sm">Execute a query to see results here</div>
+                {result.totalPages && (
+                  <span className="ml-2">
+                    (Page {result.page} of {result.totalPages})
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                Showing <span className="font-medium">1</span> to{" "}
+                <span className="font-medium">{result.rows.length}</span> of{" "}
+                <span className="font-medium">{result.rowCount || result.rows.length}</span> results
+              </>
+            )}
           </div>
+          {renderPaginationControls()}
         </div>
       )}
     </div>
