@@ -318,26 +318,52 @@ def get_relationships(db: Session, connection_id: int):
         tables = []
         relationships = []
         
+        # First, get all foreign key relationships from the schema
+        cursor.execute(f"""
+            SELECT 
+                kcu.TABLE_NAME,
+                kcu.COLUMN_NAME,
+                kcu.REFERENCED_TABLE_NAME,
+                kcu.REFERENCED_COLUMN_NAME,
+                kcu.CONSTRAINT_NAME
+            FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+            WHERE kcu.TABLE_SCHEMA = %s
+                AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
+                AND kcu.REFERENCED_COLUMN_NAME IS NOT NULL
+        """, (connection.database,))
+        
+        foreign_key_data = cursor.fetchall()
+        print(f"Found {len(foreign_key_data)} foreign key relationships")
+        for fk in foreign_key_data:
+            print(f"FK: {fk}")
+        
+        # Build relationships list
+        for fk_info in foreign_key_data:
+            table_name, column_name, ref_table, ref_column, constraint_name = fk_info
+            relationships.append({
+                "fromTable": table_name,
+                "fromColumn": column_name,
+                "toTable": ref_table,
+                "toColumn": ref_column,
+                "type": "foreign_key",
+                "constraintName": constraint_name
+            })
+        
+        # Now get table and column information
         for table_name in table_names:
             # Get row count
             cursor.execute(f"SELECT COUNT(*) FROM `{table_name}`")
             row_count = cursor.fetchone()[0]
             
-            # Get column information with foreign key details
+            # Get column information
             cursor.execute(f"""
                 SELECT 
                     c.COLUMN_NAME,
                     c.DATA_TYPE,
                     c.IS_NULLABLE,
                     c.COLUMN_KEY,
-                    kcu.REFERENCED_TABLE_NAME,
-                    kcu.REFERENCED_COLUMN_NAME
+                    c.EXTRA
                 FROM INFORMATION_SCHEMA.COLUMNS c
-                LEFT JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu 
-                    ON c.TABLE_SCHEMA = kcu.TABLE_SCHEMA 
-                    AND c.TABLE_NAME = kcu.TABLE_NAME 
-                    AND c.COLUMN_NAME = kcu.COLUMN_NAME
-                    AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
                 WHERE c.TABLE_SCHEMA = %s AND c.TABLE_NAME = %s
                 ORDER BY c.ORDINAL_POSITION
             """, (connection.database, table_name))
@@ -348,32 +374,28 @@ def get_relationships(db: Session, connection_id: int):
             columns = []
             
             for col_info in columns_info:
-                column_name, data_type, is_nullable, column_key, ref_table, ref_column = col_info
+                column_name, data_type, is_nullable, column_key, extra = col_info
                 
                 is_primary = column_key == "PRI"
-                is_foreign = ref_table is not None
+                
+                # Check if this column is a foreign key by looking in our foreign_key_data
+                is_foreign = False
+                fk_reference = None
+                for fk_info in foreign_key_data:
+                    if fk_info[0] == table_name and fk_info[1] == column_name:
+                        is_foreign = True
+                        fk_reference = {
+                            "table": fk_info[2],
+                            "column": fk_info[3]
+                        }
+                        foreign_keys.append({
+                            "column": column_name,
+                            "references": fk_reference
+                        })
+                        break
                 
                 if is_primary:
                     primary_keys.append(column_name)
-                
-                if is_foreign:
-                    foreign_key = {
-                        "column": column_name,
-                        "references": {
-                            "table": ref_table,
-                            "column": ref_column
-                        }
-                    }
-                    foreign_keys.append(foreign_key)
-                    
-                    # Add to relationships list
-                    relationships.append({
-                        "fromTable": table_name,
-                        "fromColumn": column_name,
-                        "toTable": ref_table,
-                        "toColumn": ref_column,
-                        "type": "foreign_key"
-                    })
                 
                 columns.append({
                     "name": column_name,
@@ -381,7 +403,7 @@ def get_relationships(db: Session, connection_id: int):
                     "nullable": is_nullable == "YES",
                     "isPrimaryKey": is_primary,
                     "isForeignKey": is_foreign,
-                    "references": {"table": ref_table, "column": ref_column} if is_foreign else None
+                    "references": fk_reference
                 })
             
             tables.append({
