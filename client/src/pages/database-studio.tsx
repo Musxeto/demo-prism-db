@@ -1,5 +1,5 @@
-import ResizableDatabaseStudio from "@/components/resizable-database-studio";
+import { EnhancedDatabaseStudio } from "../components/enhanced-database-studio";
 
 export default function DatabaseStudio() {
-  return <ResizableDatabaseStudio />;
+  return <EnhancedDatabaseStudio />;
 }

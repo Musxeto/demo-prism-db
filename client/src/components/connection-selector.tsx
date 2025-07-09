@@ -1,9 +1,9 @@
-import { Connection } from "@shared/schema";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Connection } from "../../../shared/schema";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 interface ConnectionSelectorProps {
   connections: Connection[];
-  selectedConnectionId: number;
+  selectedConnectionId: number | null;
   onConnectionChange: (connectionId: number) => void;
 }
 
@@ -12,12 +12,14 @@ export default function ConnectionSelector({
   selectedConnectionId,
   onConnectionChange,
 }: ConnectionSelectorProps) {
-  const selectedConnection = connections.find(conn => conn.id === selectedConnectionId);
+  const selectedConnection = selectedConnectionId 
+    ? connections.find(conn => conn.id === selectedConnectionId)
+    : null;
 
   return (
     <div className="p-4 border-b border-slate-200">
       <Select
-        value={selectedConnectionId.toString()}
+        value={selectedConnectionId?.toString() || ""}
         onValueChange={(value) => onConnectionChange(parseInt(value))}
       >
         <SelectTrigger className="w-full">
@@ -36,9 +38,11 @@ export default function ConnectionSelector({
         <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
           <span className="flex items-center">
             <div className="w-2 h-2 bg-green-400 rounded-full mr-2"></div>
-            Connected
+            Connected to {selectedConnection.name}
           </span>
-          <span>12ms</span>
+          <span>
+            {selectedConnection.host}:{selectedConnection.port}
+          </span>
         </div>
       )}
     </div>

@@ -51,8 +51,12 @@ class QueryRequest(BaseModel):
     sql: str
     page: Optional[int] = 1
     pageSize: Optional[int] = 100
+    allowMultiple: Optional[bool] = False
+    confirmDangerous: Optional[bool] = False
 
 class QueryResult(BaseModel):
+    type: str  # 'select', 'write', 'ddl', 'error', 'multi'
+    queryType: Optional[str] = None  # 'insert', 'update', 'delete', 'create_table', etc.
     columns: Optional[List[Dict[str, str]]] = None
     rows: Optional[List[List]] = None
     rowCount: Optional[int] = None
@@ -61,7 +65,14 @@ class QueryResult(BaseModel):
     pageSize: Optional[int] = None
     totalPages: Optional[int] = None
     executionTimeMs: float
+    affectedRows: Optional[int] = None
     message: Optional[str] = None
+    warnings: Optional[List[str]] = None
+    isDangerous: Optional[bool] = False
+    results: Optional[List['QueryResult']] = None  # For multi-statement results
+
+# Add forward reference support
+QueryResult.model_rebuild()
 
 
 class ConnectionTest(BaseModel):

@@ -62,7 +62,15 @@ def get_connection_relationships(connection_id: int, db: Session = Depends(get_d
 @app.post("/api/connections/{connection_id}/query")
 def run_query(connection_id: int, query: schemas.QueryRequest, db: Session = Depends(get_db)):
     try:
-        return storage.execute_query(db, connection_id, query.sql, query.page, query.pageSize)
+        return storage.execute_query(
+            db, 
+            connection_id, 
+            query.sql, 
+            query.page, 
+            query.pageSize,
+            query.allowMultiple,
+            query.confirmDangerous
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

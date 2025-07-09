@@ -88,113 +88,47 @@ def get_schema(db: Session, connection_id: int):
         return {"error": str(err)}
 
 
-def execute_query(db: Session, connection_id: int, sql: str, page: int = 1, page_size: int = 100):
-    import time
-    import re
+def execute_query(db: Session, connection_id: int, sql: str, page: int = 1, page_size: int = 100, 
+                 allow_multiple: bool = False, confirm_dangerous: bool = False):
+    from sql_engine import SQLQueryEngine
     
     connection = get_connection(db, connection_id)
     if not connection:
         raise Exception("Connection not found")
 
-    # Validate that only SELECT queries are allowed for now
-    sql_stripped = sql.strip().upper()
-    if not sql_stripped.startswith('SELECT'):
-        raise Exception("Only SELECT queries are allowed in this version")
-
+    # Prepare connection config for the SQL engine
+    connection_config = {
+        'host': connection.host,
+        'port': connection.port,
+        'database': connection.database,
+        'user': connection.username,
+        'password': connection.password,
+        'autocommit': False,
+        'raise_on_warnings': True
+    }
+    
     try:
-        mydb = mysql.connector.connect(
-            host=connection.host,
-            user=connection.username,
-            password=connection.password,
-            database=connection.database
+        # Initialize SQL engine
+        engine = SQLQueryEngine(connection_config)
+        
+        # Execute query using the enhanced SQL engine
+        result = engine.execute_query(
+            sql=sql,
+            page=page,
+            page_size=page_size,
+            allow_multiple=allow_multiple,
+            confirm_dangerous=confirm_dangerous
         )
-        cursor = mydb.cursor()
         
-        # Track execution time
-        start_time = time.time()
-        
-        # First, get the total count for SELECT queries
-        total_rows = None
-        if sql_stripped.startswith('SELECT'):
-            # Create a count query by wrapping the original query
-            count_sql = f"SELECT COUNT(*) FROM ({sql}) AS count_query"
-            try:
-                cursor.execute(count_sql)
-                total_rows = cursor.fetchone()[0]
-            except mysql.connector.Error:
-                # If count query fails, we'll execute without count
-                total_rows = None
-        
-        # Add pagination to the original query
-        paginated_sql = sql
-        if page > 0 and page_size > 0:
-            offset = (page - 1) * page_size
-            # Check if query already has LIMIT clause
-            if not re.search(r'\bLIMIT\b', sql_stripped):
-                paginated_sql = f"{sql} LIMIT {page_size} OFFSET {offset}"
-            else:
-                # If LIMIT already exists, replace it with paginated version
-                paginated_sql = re.sub(
-                    r'\bLIMIT\s+\d+(\s+OFFSET\s+\d+)?\s*$', 
-                    f'LIMIT {page_size} OFFSET {offset}', 
-                    sql, 
-                    flags=re.IGNORECASE
-                )
-        
-        cursor.execute(paginated_sql)
-        
-        if cursor.with_rows:
-            # Get column information
-            columns = [{"name": desc[0], "type": str(desc[1])} for desc in cursor.description]
-            rows = cursor.fetchall()
-            execution_time = round((time.time() - start_time) * 1000, 2)  # Convert to milliseconds
-            
-            # Convert rows to list of lists for JSON serialization
-            serialized_rows = []
-            for row in rows:
-                serialized_row = []
-                for value in row:
-                    if value is None:
-                        serialized_row.append(None)
-                    elif isinstance(value, (int, float, str, bool)):
-                        serialized_row.append(value)
-                    else:
-                        # Convert other types (datetime, decimal, etc.) to string
-                        serialized_row.append(str(value))
-                serialized_rows.append(serialized_row)
-            
-            mydb.close()
-            
-            # Save query to history
+        # Save query to history (only for non-error results)
+        if result.type != 'error':
             db.add(models.Query(connection_id=connection_id, sql=sql))
             db.commit()
-            
-            # Calculate pagination info
-            total_pages = None
-            if total_rows is not None and page_size > 0:
-                total_pages = (total_rows + page_size - 1) // page_size
-            
-            return {
-                "columns": columns,
-                "rows": serialized_rows,
-                "rowCount": len(serialized_rows),
-                "totalRows": total_rows,
-                "page": page,
-                "pageSize": page_size,
-                "totalPages": total_pages,
-                "executionTimeMs": execution_time
-            }
-        else:
-            execution_time = round((time.time() - start_time) * 1000, 2)
-            mydb.close()
-            db.add(models.Query(connection_id=connection_id, sql=sql))
-            db.commit()
-            return {
-                "message": "Query executed successfully.",
-                "executionTimeMs": execution_time
-            }
-
-    except mysql.connector.Error as err:
+        
+        # Convert QueryResult to dict for FastAPI response
+        return result.dict()
+        
+    except Exception as err:
         raise Exception(str(err))
 
 def get_queries(db: Session):

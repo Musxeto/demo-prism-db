@@ -70,6 +70,8 @@ export interface DatabaseColumn {
 }
 
 export interface QueryResult {
+  type: string; // 'select', 'write', 'ddl', 'error', 'multi'
+  queryType?: string; // 'insert', 'update', 'delete', 'create_table', etc.
   columns?: Array<{ name: string; type: string }>;
   rows?: any[][];
   rowCount?: number;
@@ -78,7 +80,11 @@ export interface QueryResult {
   pageSize?: number;
   totalPages?: number;
   executionTimeMs: number;
+  affectedRows?: number;
   message?: string;
+  warnings?: string[];
+  isDangerous?: boolean;
+  results?: QueryResult[]; // For multi-statement results
 }
 
 export interface ColumnSchema {
