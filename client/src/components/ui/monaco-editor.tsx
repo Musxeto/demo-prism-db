@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 
 // Define Monaco types
 declare global {
@@ -17,6 +17,13 @@ interface MonacoEditorProps {
   language?: string;
   theme?: string;
   options?: any;
+}
+
+export interface MonacoEditorRef {
+  getEditor: () => any;
+  getValue: () => string;
+  setValue: (value: string) => void;
+  focus: () => void;
 }
 
 // Singleton Monaco loader
@@ -96,15 +103,22 @@ const loadMonaco = (): Promise<void> => {
   });
 };
 
-export default function MonacoEditor({
+export default forwardRef<MonacoEditorRef, MonacoEditorProps>(function MonacoEditor({
   value,
   onChange,
   language = "sql",
   theme = "vs",
   options = {},
-}: MonacoEditorProps) {
+}, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
+
+  useImperativeHandle(ref, () => ({
+    getEditor: () => editorRef.current,
+    getValue: () => editorRef.current?.getValue() || '',
+    setValue: (value: string) => editorRef.current?.setValue(value),
+    focus: () => editorRef.current?.focus(),
+  }));
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -163,9 +177,20 @@ export default function MonacoEditor({
     };
   }, []);
 
+  // Enhanced value sync to ensure the editor always reflects the latest content
   useEffect(() => {
-    if (editorRef.current && editorRef.current.getValue() !== value) {
-      editorRef.current.setValue(value);
+    if (editorRef.current) {
+      const currentEditorValue = editorRef.current.getValue();
+      // Only update if values are different to prevent cursor jumps
+      if (value !== undefined && currentEditorValue !== value) {
+        editorRef.current.setValue(value);
+        // After setting value, preserve the cursor position if possible
+        setTimeout(() => {
+          if (editorRef.current) {
+            editorRef.current.focus();
+          }
+        }, 0);
+      }
     }
   }, [value]);
 
@@ -176,4 +201,4 @@ export default function MonacoEditor({
       style={{ minHeight: "300px" }}
     />
   );
-}
+});

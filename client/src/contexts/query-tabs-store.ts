@@ -26,7 +26,7 @@ interface QueryTabsStore {
   // Actions
   addTab: (connectionId: number, initialQuery?: string, tableName?: string) => string;
   removeTab: (tabId: string) => void;
-  setActiveTab: (tabId: string) => void;
+  setActiveTab: (tabId: string, onAutoSave?: (tabName: string) => void) => void;
   updateTabQuery: (tabId: string, query: string) => void;
   updateTabName: (tabId: string, name: string) => void;
   setTabExecuting: (tabId: string, isExecuting: boolean) => void;
@@ -38,6 +38,8 @@ interface QueryTabsStore {
   changeTabConnection: (tabId: string, connectionId: number) => void;
   duplicateTab: (tabId: string) => string;
   closeAllTabs: () => void;
+  saveAllTabs: () => void;
+  saveTab: (tabId: string) => void;
   
   // Computed getters
   getActiveTab: () => QueryTab | null;
@@ -53,10 +55,30 @@ export const useQueryTabsStore = create<QueryTabsStore>()(
       activeTabId: null,
 
       addTab: (connectionId: number, initialQuery?: string, tableName?: string) => {
+        const state = get();
+        // Always generate a unique ID using nanoid for each tab
         const newTabId = nanoid();
-        const tabName = tableName ? `${tableName}` : `Query ${get().tabs.length + 1}`;
+        
+        // Generate a unique tab name
+        let tabName: string;
+        if (tableName) {
+          tabName = tableName;
+        } else {
+          // Find the next available query number
+          const existingNumbers = state.tabs
+            .map(tab => {
+              const match = tab.name.match(/^Query (\d+)$/);
+              return match ? parseInt(match[1], 10) : 0;
+            })
+            .filter(num => num > 0);
+          
+          const nextNumber = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : 1;
+          tabName = `Query ${nextNumber}`;
+        }
+        
         const query = initialQuery || (tableName ? `SELECT * FROM ${tableName} LIMIT 100;` : '');
         
+        // Ensure all required fields are initialized
         const newTab: QueryTab = {
           id: newTabId,
           name: tabName,
@@ -66,6 +88,7 @@ export const useQueryTabsStore = create<QueryTabsStore>()(
           createdAt: new Date(),
           updatedAt: new Date(),
           hasUnsavedChanges: false,
+          lastExecutedQuery: query, // Initialize this to match the query so hasUnsavedChanges works correctly
         };
 
         set((state) => ({
@@ -100,8 +123,48 @@ export const useQueryTabsStore = create<QueryTabsStore>()(
         });
       },
 
-      setActiveTab: (tabId: string) => {
-        set({ activeTabId: tabId });
+      setActiveTab: (tabId: string, onAutoSave?: (tabName: string) => void) => {
+        set((state) => {
+          // First check if the requested tab actually exists
+          const targetTab = state.tabs.find(tab => tab.id === tabId);
+          
+          // Auto-save current tab before switching, but only if it has actual content
+          const currentTab = state.tabs.find(tab => tab.id === state.activeTabId);
+          if (currentTab && currentTab.hasUnsavedChanges && currentTab.query.trim()) {
+            // Mark the current tab as saved by updating lastExecutedQuery
+            const updatedTabs = state.tabs.map(tab =>
+              tab.id === currentTab.id
+                ? {
+                    ...tab,
+                    lastExecutedQuery: tab.query,
+                    hasUnsavedChanges: false,
+                    updatedAt: new Date(),
+                  }
+                : tab
+            );
+            
+            // Notify about auto-save
+            if (onAutoSave) {
+              onAutoSave(currentTab.name);
+            }
+            
+            // Only set active tab if the tab actually exists
+            if (targetTab) {
+              return { tabs: updatedTabs, activeTabId: tabId };
+            }
+            // If tab doesn't exist, keep current activeTabId or set to first available tab
+            const fallbackTabId = updatedTabs.length > 0 ? updatedTabs[0].id : null;
+            return { tabs: updatedTabs, activeTabId: fallbackTabId };
+          }
+          
+          // No auto-save needed, just switch tabs
+          if (targetTab) {
+            return { activeTabId: tabId };
+          }
+          // If tab doesn't exist, keep current activeTabId or set to first available tab
+          const fallbackTabId = state.tabs.length > 0 ? state.tabs[0].id : null;
+          return { activeTabId: fallbackTabId };
+        });
       },
 
       updateTabQuery: (tabId: string, query: string) => {
@@ -216,14 +279,35 @@ export const useQueryTabsStore = create<QueryTabsStore>()(
       },
 
       duplicateTab: (tabId: string) => {
-        const tab = get().getTabById(tabId);
+        const state = get();
+        const tab = state.tabs.find(t => t.id === tabId);
         if (!tab) return '';
 
         const newTabId = nanoid();
+        
+        // Generate a unique name for the duplicated tab
+        let baseName = tab.name;
+        if (baseName.endsWith(' (Copy)')) {
+          baseName = baseName.replace(/ \(Copy\)$/, '');
+        }
+        
+        // Find existing copies and generate next number
+        const copyPattern = new RegExp(`^${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\(Copy(?: (\\d+))?\\)$`);
+        const existingCopies = state.tabs
+          .map(t => {
+            const match = t.name.match(copyPattern);
+            if (!match) return 0;
+            return match[1] ? parseInt(match[1], 10) : 1;
+          })
+          .filter(num => num > 0);
+        
+        const nextCopyNumber = existingCopies.length > 0 ? Math.max(...existingCopies) + 1 : 1;
+        const newName = nextCopyNumber === 1 ? `${baseName} (Copy)` : `${baseName} (Copy ${nextCopyNumber})`;
+        
         const newTab: QueryTab = {
           ...tab,
           id: newTabId,
-          name: `${tab.name} (Copy)`,
+          name: newName,
           createdAt: new Date(),
           updatedAt: new Date(),
         };
@@ -240,10 +324,49 @@ export const useQueryTabsStore = create<QueryTabsStore>()(
         set({ tabs: [], activeTabId: null });
       },
 
+      saveAllTabs: () => {
+        set((state) => ({
+          tabs: state.tabs.map(tab => ({
+            ...tab,
+            lastExecutedQuery: tab.query,
+            hasUnsavedChanges: false,
+            updatedAt: new Date(),
+          })),
+        }));
+      },
+
+      saveTab: (tabId: string) => {
+        set((state) => {
+          const updated = {
+            tabs: state.tabs.map(tab =>
+              tab.id === tabId
+                ? {
+                    ...tab,
+                    lastExecutedQuery: tab.query,
+                    hasUnsavedChanges: false,
+                    updatedAt: new Date(),
+                  }
+                : tab
+            ),
+          };
+          return updated;
+        });
+      },
+
       // Computed getters
       getActiveTab: () => {
         const state = get();
-        return state.tabs.find(tab => tab.id === state.activeTabId) || null;
+        let activeTab = state.tabs.find(tab => tab.id === state.activeTabId);
+        
+        // If no active tab found but tabs exist, auto-select the first tab
+        if (!activeTab && state.tabs.length > 0) {
+          const firstTab = state.tabs[0];
+          // Update the active tab ID to the first available tab
+          set({ activeTabId: firstTab.id });
+          return firstTab;
+        }
+        
+        return activeTab || null;
       },
 
       getTabById: (tabId: string) => {

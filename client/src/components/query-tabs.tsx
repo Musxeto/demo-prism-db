@@ -17,6 +17,7 @@ import {
 import { EditableTabName } from './editable-tab-name';
 import { Plus, X, Circle } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useToast } from '../hooks/use-toast';
 
 interface QueryTabsProps {
   defaultConnectionId?: number;
@@ -34,6 +35,7 @@ export function QueryTabs({ defaultConnectionId }: QueryTabsProps) {
   } = useQueryTabsStore();
 
   const tabsContainerRef = useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
 
   // Auto-scroll to active tab when it changes
   useEffect(() => {
@@ -70,7 +72,13 @@ export function QueryTabs({ defaultConnectionId }: QueryTabsProps) {
   };
 
   const handleTabClick = (tabId: string) => {
-    setActiveTab(tabId);
+    setActiveTab(tabId, (tabName: string) => {
+      toast({
+        title: "Tab auto-saved",
+        description: `"${tabName}" was automatically saved`,
+        duration: 2000,
+      });
+    });
   };
 
   const unsavedTabs = getTabsWithUnsavedChanges();

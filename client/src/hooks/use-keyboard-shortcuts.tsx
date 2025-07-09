@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useQueryTabsStore } from '../contexts/query-tabs-store';
+import { useToast } from './use-toast';
 
 interface KeyboardShortcut {
   key: string;
@@ -12,7 +13,8 @@ interface KeyboardShortcut {
 }
 
 export function useQueryEditorShortcuts(connectionId: number | null) {
-  const { addTab, removeTab, setActiveTab, tabs, activeTabId, getActiveTab } = useQueryTabsStore();
+  const { addTab, removeTab, setActiveTab, tabs, activeTabId, getActiveTab, saveAllTabs, saveTab } = useQueryTabsStore();
+  const { toast } = useToast();
 
   const shortcuts: KeyboardShortcut[] = [
     {
@@ -36,13 +38,38 @@ export function useQueryEditorShortcuts(connectionId: number | null) {
       description: 'Close current tab',
     },
     {
+      key: 's',
+      ctrlKey: true,
+      action: () => {
+        if (activeTabId) {
+          saveTab(activeTabId);
+        }
+      },
+      description: 'Save current tab',
+    },
+    {
+      key: 's',
+      ctrlKey: true,
+      shiftKey: true,
+      action: () => {
+        saveAllTabs();
+      },
+      description: 'Save all tabs',
+    },
+    {
       key: 'Tab',
       ctrlKey: true,
       action: () => {
         if (tabs.length > 1) {
           const currentIndex = tabs.findIndex(tab => tab.id === activeTabId);
           const nextIndex = (currentIndex + 1) % tabs.length;
-          setActiveTab(tabs[nextIndex].id);
+          setActiveTab(tabs[nextIndex].id, (tabName: string) => {
+            toast({
+              title: "Tab auto-saved",
+              description: `"${tabName}" was automatically saved`,
+              duration: 2000,
+            });
+          });
         }
       },
       description: 'Switch to next tab',
@@ -55,7 +82,13 @@ export function useQueryEditorShortcuts(connectionId: number | null) {
         if (tabs.length > 1) {
           const currentIndex = tabs.findIndex(tab => tab.id === activeTabId);
           const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length;
-          setActiveTab(tabs[prevIndex].id);
+          setActiveTab(tabs[prevIndex].id, (tabName: string) => {
+            toast({
+              title: "Tab auto-saved",
+              description: `"${tabName}" was automatically saved`,
+              duration: 2000,
+            });
+          });
         }
       },
       description: 'Switch to previous tab',
@@ -66,7 +99,13 @@ export function useQueryEditorShortcuts(connectionId: number | null) {
       ctrlKey: true,
       action: () => {
         if (tabs[i]) {
-          setActiveTab(tabs[i].id);
+          setActiveTab(tabs[i].id, (tabName: string) => {
+            toast({
+              title: "Tab auto-saved",
+              description: `"${tabName}" was automatically saved`,
+              duration: 2000,
+            });
+          });
         }
       },
       description: `Switch to tab ${i + 1}`,
@@ -119,7 +158,8 @@ export function KeyboardShortcutsHelp() {
     { key: 'Ctrl/Cmd + Shift + Tab', description: 'Switch to previous tab' },
     { key: 'Ctrl/Cmd + 1-9', description: 'Switch to specific tab' },
     { key: 'Ctrl/Cmd + Enter', description: 'Execute query' },
-    { key: 'Ctrl/Cmd + S', description: 'Save query (coming soon)' },
+    { key: 'Ctrl/Cmd + S', description: 'Save current tab' },
+    { key: 'Ctrl/Cmd + Shift + S', description: 'Save all tabs' },
     { key: 'Ctrl/Cmd + F', description: 'Find in editor' },
     { key: 'Ctrl/Cmd + H', description: 'Find and replace' },
   ];

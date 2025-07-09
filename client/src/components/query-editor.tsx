@@ -4,7 +4,7 @@ import { QueryResult } from "../../../shared/schema";
 import { useQueryTabsStore, QueryTab } from "../contexts/query-tabs-store";
 import { Button } from "./ui/button";
 import { Play, Loader2, AlertCircle, Clock, Shield, FileText, X, AlertTriangle } from "lucide-react";
-import MonacoEditor from "./ui/monaco-editor";
+import MonacoEditor, { MonacoEditorRef } from "./ui/monaco-editor";
 import { apiRequest } from "../lib/queryClient";
 import { useToast } from "../hooks/use-toast";
 import { cn } from "../lib/utils";
@@ -17,7 +17,7 @@ interface QueryEditorProps {
 
 export default function QueryEditor({ tab, className }: QueryEditorProps) {
   const { toast } = useToast();
-  const editorRef = useRef<any>(null);
+  const editorRef = useRef<MonacoEditorRef>(null);
   const [showSafetyDialog, setShowSafetyDialog] = useState(false);
   const [pendingQueryOptions, setPendingQueryOptions] = useState<{
     sql: string;
@@ -223,7 +223,18 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
 
   // Handle query execution with safety checks
   const handleExecuteQuery = useCallback((options?: { page?: number; pageSize?: number }) => {
-    if (!tab.query.trim()) {
+    // Force sync the editor content with the tab state before execution
+    if (editorRef.current) {
+      const currentEditorValue = editorRef.current.getValue();
+      if (currentEditorValue !== tab.query) {
+        updateTabQuery(tab.id, currentEditorValue);
+      }
+    }
+    
+    // Get the latest query content (possibly just updated)
+    const currentQuery = editorRef.current ? editorRef.current.getValue() : tab.query;
+    
+    if (!currentQuery.trim()) {
       toast({
         variant: "destructive",
         title: "No query to execute",
@@ -231,13 +242,14 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
       });
       return;
     }
-
-    const analysis = analyzeQuery(tab.query);
+    
+    // Use the synced currentQuery instead of tab.query
+    const analysis = analyzeQuery(currentQuery);
     
     // If query is potentially dangerous or multi-statement, show safety dialog
     if (analysis.isDangerous || analysis.isMultiStatement) {
       setPendingQueryOptions({
-        sql: tab.query,
+        sql: currentQuery,
         page: options?.page || 1,
         pageSize: options?.pageSize || 100,
       });
@@ -247,7 +259,7 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
 
     // Execute immediately for safe, single-statement queries
     executeQueryDirectly({
-      sql: tab.query,
+      sql: currentQuery,
       page: options?.page || 1,
       pageSize: options?.pageSize || 100,
     });
@@ -288,8 +300,32 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
 
   // Handle editor content change
   const handleEditorChange = useCallback((value: string | undefined) => {
-    updateTabQuery(tab.id, value || '');
+    const newQuery = value || '';
+    // Immediately update the tab query
+    updateTabQuery(tab.id, newQuery);
   }, [tab.id, updateTabQuery]);
+
+  // Sync editor content when tab changes
+  useEffect(() => {
+    if (editorRef.current) {
+      const currentValue = editorRef.current.getValue();
+      // Only update if the values are different to avoid infinite loops
+      if (currentValue !== tab.query) {
+        editorRef.current.setValue(tab.query || '');
+      }
+    }
+  }, [tab.id]); // Only depend on tab.id to sync when switching tabs
+
+  // Separate effect to handle query content updates
+  useEffect(() => {
+    if (editorRef.current) {
+      const currentValue = editorRef.current.getValue();
+      // If the tab query changed externally, update the editor
+      if (currentValue !== tab.query) {
+        editorRef.current.setValue(tab.query || '');
+      }
+    }
+  }, [tab.query]);
 
   // Listen for custom execute query events from Monaco
   useEffect(() => {
@@ -303,12 +339,29 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
     };
   }, [handleExecuteQuery]);
 
-  // Focus editor when tab becomes active
+  // Force sync editor content to tab state when tab becomes active
   useEffect(() => {
     if (editorRef.current) {
+      // Get current editor content and sync it to the tab
+      const currentValue = editorRef.current.getValue();
+      if (currentValue !== tab.query) {
+        // Always update the tab query to match editor content
+        updateTabQuery(tab.id, currentValue);
+      }
+      // Focus the editor
       editorRef.current.focus();
     }
-  }, [tab.id]);
+  }, [tab.id, updateTabQuery]);
+
+  // Also force sync when the component mounts
+  useEffect(() => {
+    if (editorRef.current) {
+      const currentValue = editorRef.current.getValue();
+      if (currentValue && currentValue !== tab.query) {
+        updateTabQuery(tab.id, currentValue);
+      }
+    }
+  }, []);
 
   // Show error popup when tab.error changes
   useEffect(() => {
@@ -335,9 +388,10 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
         <div className="flex items-center gap-2">
           <Button
             onClick={() => handleExecuteQuery()}
-            disabled={tab.isExecuting || !tab.query.trim()}
+            disabled={tab.isExecuting || (!tab.query.trim() && (!editorRef.current || !editorRef.current.getValue().trim()))}
             size="sm"
             className="gap-2"
+            title={`Execute query for tab ${tab.name} (Connection: ${tab.connectionId})`}
           >
             {tab.isExecuting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -396,6 +450,7 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
       {/* Monaco Editor */}
       <div className="flex-1 min-h-0">
         <MonacoEditor
+          ref={editorRef}
           value={tab.query}
           onChange={handleEditorChange}
           language="sql"
