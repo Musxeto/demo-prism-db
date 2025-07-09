@@ -18,3 +18,17 @@ export const testAndLoadConnection = async (
 
   return response.json();
 };
+
+export const logAction = async (actionType: string, details?: object) => {
+  try {
+    await fetch(`http://localhost:5000/api/logs/actions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ action_type: actionType, details }),
+    });
+  } catch (error) {
+    console.error('Failed to log action:', error);
+  }
+};

@@ -19,18 +19,21 @@ import {
   Maximize2, 
   Minimize2,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  History // Import History icon
 } from 'lucide-react';
+import { QueryHistoryModal } from './query-history-modal'; // Import the modal
 
 type ViewMode = 'query' | 'erd';
 
 export function EnhancedDatabaseStudio() {
   const [selectedConnectionId, setSelectedConnectionId] = useState<number | null>(null);
   const [isConnectionModalOpen, setIsConnectionModalOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false); // State for history modal
   const [viewMode, setViewMode] = useState<ViewMode>('query');
   const [isSchemaCollapsed, setIsSchemaCollapsed] = useState(false);
   
-  const { tabs, hasUnsavedChanges, closeAllTabs } = useQueryTabsStore();
+  const { tabs, activeTabId, hasUnsavedChanges, closeAllTabs, addTab } = useQueryTabsStore();
 
   const { data: connections, isLoading: connectionsLoading, refetch } = useQuery<Connection[]>({
     queryKey: ['/api/connections'],
@@ -53,6 +56,13 @@ export function EnhancedDatabaseStudio() {
       closeAllTabs();
     }
     setSelectedConnectionId(connectionId);
+  };
+
+  const handleQuerySelectFromHistory = (query: string) => {
+    if (selectedConnectionId) {
+      addTab(selectedConnectionId, query);
+    }
+    setIsHistoryModalOpen(false);
   };
 
   const toggleSchemaPanel = () => {
@@ -191,7 +201,10 @@ export function EnhancedDatabaseStudio() {
             {!isSchemaCollapsed && (
               <>
                 <ResizablePanel defaultSize={25} minSize={15} maxSize={40}>
-                  <SchemaBrowserWithTabs connectionId={selectedConnectionId} />
+                  <SchemaBrowserWithTabs 
+                    connectionId={selectedConnectionId} 
+                    onViewHistoryClick={() => setIsHistoryModalOpen(true)}
+                  />
                 </ResizablePanel>
                 <ResizableHandle />
               </>
@@ -217,6 +230,14 @@ export function EnhancedDatabaseStudio() {
           setIsConnectionModalOpen(false);
           refetch();
         }}
+      />
+
+      {/* History Modal */}
+      <QueryHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        onQuerySelect={handleQuerySelectFromHistory}
+        connectionId={selectedConnectionId}
       />
     </div>
   );

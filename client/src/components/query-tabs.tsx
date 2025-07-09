@@ -18,6 +18,7 @@ import { EditableTabName } from './editable-tab-name';
 import { Plus, X, Circle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useToast } from '../hooks/use-toast';
+import { logAction } from '../lib/api';
 
 interface QueryTabsProps {
   defaultConnectionId?: number;
@@ -55,7 +56,8 @@ export function QueryTabs({ defaultConnectionId }: QueryTabsProps) {
 
   const handleAddTab = () => {
     if (defaultConnectionId) {
-      addTab(defaultConnectionId);
+      const newTabId = addTab(defaultConnectionId);
+      logAction('add_tab', { tabId: newTabId, connectionId: defaultConnectionId });
     }
   };
 
@@ -65,13 +67,18 @@ export function QueryTabs({ defaultConnectionId }: QueryTabsProps) {
       return;
     }
     removeTab(tabId);
+    logAction('close_tab', { tabId });
   };
 
   const handleForceCloseTab = (tabId: string) => {
     removeTab(tabId);
+    logAction('force_close_tab', { tabId });
   };
 
   const handleTabClick = (tabId: string) => {
+    if (activeTabId !== tabId) {
+      logAction('switch_tab', { fromTabId: activeTabId, toTabId: tabId });
+    }
     setActiveTab(tabId, (tabName: string) => {
       toast({
         title: "Tab auto-saved",
@@ -79,6 +86,12 @@ export function QueryTabs({ defaultConnectionId }: QueryTabsProps) {
         duration: 2000,
       });
     });
+  };
+
+  const handleUpdateTabName = (tabId: string, newName: string) => {
+    const oldName = tabs.find(t => t.id === tabId)?.name;
+    updateTabName(tabId, newName);
+    logAction('rename_tab', { tabId, oldName, newName });
   };
 
   const unsavedTabs = getTabsWithUnsavedChanges();
@@ -134,7 +147,7 @@ export function QueryTabs({ defaultConnectionId }: QueryTabsProps) {
                 <div className="flex-1 min-w-0">
                   <EditableTabName
                     value={tab.name}
-                    onChange={(name) => updateTabName(tab.id, name)}
+                    onChange={(name) => handleUpdateTabName(tab.id, name)}
                     className="text-sm font-medium truncate"
                   />
                 </div>

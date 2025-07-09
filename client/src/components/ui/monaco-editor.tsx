@@ -17,6 +17,7 @@ interface MonacoEditorProps {
   language?: string;
   theme?: string;
   options?: any;
+  initialValue?: string; // Add initialValue to props
 }
 
 export interface MonacoEditorRef {
@@ -109,6 +110,7 @@ export default forwardRef<MonacoEditorRef, MonacoEditorProps>(function MonacoEdi
   language = "sql",
   theme = "vs",
   options = {},
+  initialValue = '', // Destructure initialValue
 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
@@ -132,7 +134,7 @@ export default forwardRef<MonacoEditorRef, MonacoEditorProps>(function MonacoEdi
         if (!mounted || !containerRef.current || editorRef.current) return;
 
         editorRef.current = window.monaco.editor.create(containerRef.current, {
-          value,
+          value: initialValue || value, // Use initialValue if provided
           language,
           theme,
           automaticLayout: true,

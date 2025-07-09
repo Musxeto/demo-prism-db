@@ -49,6 +49,7 @@ class DatabaseSchema(BaseModel):
 
 class QueryRequest(BaseModel):
     sql: str
+    tabId: Optional[str] = None
     page: Optional[int] = 1
     pageSize: Optional[int] = 10  # Changed from 100 to 10 for better pagination display
     allowMultiple: Optional[bool] = False
@@ -73,6 +74,11 @@ class QueryResult(BaseModel):
 
 # Add forward reference support
 QueryResult.model_rebuild()
+
+
+class ActionLogCreate(BaseModel):
+    action_type: str
+    details: Optional[dict] = None
 
 
 class ConnectionTest(BaseModel):

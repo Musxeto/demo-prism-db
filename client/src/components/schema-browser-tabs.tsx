@@ -29,7 +29,7 @@ import {
   Plus,
   Copy,
   Settings,
-  BarChart3
+  History // Changed from BarChart3
 } from "lucide-react";
 import { useToast } from "../hooks/use-toast";
 import { cn } from "../lib/utils";
@@ -37,9 +37,10 @@ import { cn } from "../lib/utils";
 interface SchemaBrowserWithTabsProps {
   connectionId: number;
   className?: string;
+  onViewHistoryClick: () => void;
 }
 
-export function SchemaBrowserWithTabs({ connectionId, className }: SchemaBrowserWithTabsProps) {
+export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryClick }: SchemaBrowserWithTabsProps) {
   const { toast } = useToast();
   const { addTab } = useQueryTabsStore();
   const [openTables, setOpenTables] = useState<Set<string>>(new Set());
@@ -211,6 +212,15 @@ export function SchemaBrowserWithTabs({ connectionId, className }: SchemaBrowser
           <h3 className="text-sm font-medium text-slate-700">Database Schema</h3>
           <div className="flex items-center gap-1">
             <Button
+              variant="ghost"
+              size="sm"
+              onClick={onViewHistoryClick}
+              className="h-6 w-6 p-0"
+              title="View Query History"
+            >
+              <History className="w-4 h-4" />
+            </Button>
+            <Button
               onClick={handleNewQueryTab}
               variant="ghost"
               size="sm"
@@ -333,10 +343,6 @@ export function SchemaBrowserWithTabs({ connectionId, className }: SchemaBrowser
           <Button variant="ghost" className="w-full justify-start text-sm text-slate-600">
             <Settings className="w-4 h-4 mr-3" />
             Connection Settings
-          </Button>
-          <Button variant="ghost" className="w-full justify-start text-sm text-slate-600">
-            <BarChart3 className="w-4 h-4 mr-3" />
-            View Query History
           </Button>
         </div>
       </div>

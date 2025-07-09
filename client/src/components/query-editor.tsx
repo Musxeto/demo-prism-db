@@ -143,6 +143,7 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
     mutationFn: async ({ 
       connectionId, 
       sql, 
+      tabId, // Add tabId here
       page = 1, 
       pageSize = 100, 
       allowMultiple = false, 
@@ -150,6 +151,7 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
     }: { 
       connectionId: number; 
       sql: string; 
+      tabId: string; // Add tabId here
       page?: number; 
       pageSize?: number; 
       allowMultiple?: boolean;
@@ -157,6 +159,7 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
     }) => {
       const response = await apiRequest("POST", `/api/connections/${connectionId}/query`, { 
         sql, 
+        tabId,
         page, 
         pageSize,
         allowMultiple,
@@ -263,7 +266,7 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
       page: options?.page || 1,
       pageSize: options?.pageSize || 100,
     });
-  }, [tab.query, tab.id, toast]);
+  }, [tab.query, tab.id, toast, updateTabQuery]);
 
   const executeQueryDirectly = useCallback((params: {
     sql: string;
@@ -276,6 +279,7 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
     setTabExecuting(tab.id, true);
     executeQueryMutation.mutate({
       connectionId: tab.connectionId,
+      tabId: tab.id,
       ...params,
     });
   }, [tab.connectionId, tab.id, executeQueryMutation, clearTabError, setTabExecuting]);
@@ -387,11 +391,11 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
       <div className="flex items-center justify-between p-3 border-b bg-muted/30">
         <div className="flex items-center gap-2">
           <Button
-            onClick={() => handleExecuteQuery()}
-            disabled={tab.isExecuting || (!tab.query.trim() && (!editorRef.current || !editorRef.current.getValue().trim()))}
+            variant="default"
             size="sm"
-            className="gap-2"
-            title={`Execute query for tab ${tab.name} (Connection: ${tab.connectionId})`}
+            disabled={tab.isExecuting}
+            onClick={() => handleExecuteQuery()}
+            className="flex items-center gap-1"
           >
             {tab.isExecuting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -452,6 +456,7 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
         <MonacoEditor
           ref={editorRef}
           value={tab.query}
+          initialValue={tab.query}
           onChange={handleEditorChange}
           language="sql"
           options={{
