@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { useQueryTabsStore } from '../contexts/query-tabs-store';
 import { QueryTabs } from './query-tabs';
 import QueryEditor from './query-editor';
-import { ResultsPanelTab } from './results-panel-mysql-style';
+import { ResultsPanelTab } from './results-panel-tab-enhanced';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from './ui/resizable';
 import { Alert, AlertDescription } from './ui/alert';
 import { AlertCircle, Database } from 'lucide-react';

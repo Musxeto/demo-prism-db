@@ -8,7 +8,7 @@ import { AlertCircle } from "lucide-react";
 import { useToast } from "../hooks/use-toast";
 import { apiRequest } from "../lib/queryClient";
 import { cn } from "../lib/utils";
-import { EnhancedResultsPanel } from "./enhanced-results-panel";
+import { ClientPaginatedResultsPanel } from "./client-paginated-results-panel";
 
 interface ResultsPanelTabProps {
   tab: QueryTab;
@@ -17,49 +17,6 @@ interface ResultsPanelTabProps {
 
 export function ResultsPanelTab({ tab, className }: ResultsPanelTabProps) {
   const { toast } = useToast();
-  const { setTabResult } = useQueryTabsStore();
-
-  // Pagination mutation
-  const paginationMutation = useMutation({
-    mutationFn: async ({ sql, page, pageSize }: { 
-      sql: string; 
-      page: number; 
-      pageSize: number 
-    }) => {
-      const response = await apiRequest("POST", `/api/connections/${tab.connectionId}/query`, { 
-        sql, 
-        page, 
-        pageSize,
-        allowMultiple: false,
-        confirmDangerous: true // Already confirmed if we're here
-      });
-      return response.json();
-    },
-    onSuccess: (result: QueryResult) => {
-      setTabResult(tab.id, result, tab.lastExecutedQuery || '');
-      toast({
-        title: "Page loaded",
-        description: `Page ${result.page} of ${result.totalPages}`,
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        variant: "destructive",
-        title: "Failed to load page",
-        description: error?.message || "Unknown error occurred",
-      });
-    },
-  });
-
-  const handlePageChange = (page: number) => {
-    if (!tab.lastExecutedQuery || !tab.result) return;
-    
-    paginationMutation.mutate({
-      sql: tab.lastExecutedQuery,
-      page,
-      pageSize: tab.result.pageSize || 100,
-    });
-  };
 
   const handleExport = () => {
     if (!tab.result || !tab.result.rows) {
@@ -159,10 +116,9 @@ export function ResultsPanelTab({ tab, className }: ResultsPanelTabProps) {
 
   return (
     <div className={cn("flex flex-col h-full", className)}>
-      <div className="flex-1 p-4 overflow-auto">
-        <EnhancedResultsPanel 
+      <div className="flex-1 p-4 overflow-hidden">
+        <ClientPaginatedResultsPanel 
           result={tab.result}
-          onPageChange={handlePageChange}
           onExport={handleExport}
         />
       </div>
