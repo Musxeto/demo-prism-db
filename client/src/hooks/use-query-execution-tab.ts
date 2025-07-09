@@ -30,7 +30,7 @@ export function useQueryExecution({ tabId, connectionId }: UseQueryExecutionProp
     mutationFn: async ({ 
       sql, 
       page = 1, 
-      pageSize = 100, 
+      pageSize = 10, // Changed from 100 to 10 for better pagination display
       allowMultiple = false, 
       confirmDangerous = false 
     }: { 

@@ -88,7 +88,7 @@ def get_schema(db: Session, connection_id: int):
         return {"error": str(err)}
 
 
-def execute_query(db: Session, connection_id: int, sql: str, page: int = 1, page_size: int = 100, 
+def execute_query(db: Session, connection_id: int, sql: str, page: int = 1, page_size: int = 10, 
                  allow_multiple: bool = False, confirm_dangerous: bool = False):
     from sql_engine import SQLQueryEngine
     

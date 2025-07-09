@@ -50,7 +50,7 @@ class DatabaseSchema(BaseModel):
 class QueryRequest(BaseModel):
     sql: str
     page: Optional[int] = 1
-    pageSize: Optional[int] = 100
+    pageSize: Optional[int] = 10  # Changed from 100 to 10 for better pagination display
     allowMultiple: Optional[bool] = False
     confirmDangerous: Optional[bool] = False
 

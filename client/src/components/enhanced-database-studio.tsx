@@ -11,6 +11,7 @@ import { SchemaBrowserWithTabs } from './schema-browser-tabs';
 import { MultiTabQueryStudio } from './multi-tab-query-studio';
 import ConnectionModal from './connection-modal';
 import ERDViewer from './erd-viewer';
+import { SQLTestDemo } from './sql-comprehensive-test';
 import { 
   Database, 
   Plus, 
@@ -19,10 +20,11 @@ import {
   Maximize2, 
   Minimize2,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  TestTube2
 } from 'lucide-react';
 
-type ViewMode = 'query' | 'erd';
+type ViewMode = 'query' | 'erd' | 'test';
 
 export function EnhancedDatabaseStudio() {
   const [selectedConnectionId, setSelectedConnectionId] = useState<number | null>(null);
@@ -142,6 +144,16 @@ export function EnhancedDatabaseStudio() {
               <GitBranch className="h-4 w-4 mr-1" />
               ERD
             </Button>
+            <Button
+              variant={viewMode === 'test' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setViewMode('test')}
+              className="h-7 px-2"
+              disabled={!selectedConnectionId}
+            >
+              <TestTube2 className="h-4 w-4 mr-1" />
+              Test
+            </Button>
           </div>
 
           <Button
@@ -201,6 +213,8 @@ export function EnhancedDatabaseStudio() {
             <ResizablePanel defaultSize={isSchemaCollapsed ? 100 : 75}>
               {viewMode === 'query' ? (
                 <MultiTabQueryStudio connectionId={selectedConnectionId} />
+              ) : viewMode === 'test' ? (
+                <SQLTestDemo connectionId={selectedConnectionId} />
               ) : (
                 selectedConnectionId && <ERDViewer connectionId={selectedConnectionId} />
               )}

@@ -200,7 +200,7 @@ export function ResultsPanelTab({ tab, className }: ResultsPanelTabProps) {
     paginationMutation.mutate({
       sql: tab.lastExecutedQuery,
       page,
-      pageSize: tab.result.pageSize || 100,
+      pageSize: tab.result.pageSize || 10, // Changed from 100 to 10
     });
   };
 

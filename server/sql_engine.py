@@ -214,7 +214,7 @@ class SQLQueryEngine:
             isDangerous=is_dangerous
         )
     
-    def execute_query(self, sql: str, page: int = 1, page_size: int = 100, 
+    def execute_query(self, sql: str, page: int = 1, page_size: int = 10, 
                      allow_multiple: bool = False, confirm_dangerous: bool = False) -> QueryResult:
         """Main query execution method"""
         statements = self.split_statements(sql)
