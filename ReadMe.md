@@ -1,6 +1,6 @@
 # Database Query Studio
 
-A modern, full-stack database management platform built with React, FastAPI, and MySQL. This application provides a comprehensive interface for managing database connections, browsing schemas, executing queries, and analyzing results.
+A modern, full-stack database management platform built with React, FastAPI, and support for multiple database systems (MySQL and PostgreSQL). This application provides a comprehensive interface for managing database connections, browsing schemas, executing queries, and analyzing results.
 
 ## 🚀 Quick Start Guide
 
@@ -9,6 +9,7 @@ Before running this application, make sure you have:
 - **Node.js** (v18 or higher) - [Download here](https://nodejs.org/)
 - **Python** (v3.8 or higher) - [Download here](https://python.org/)
 - **MySQL Server** - [Download here](https://dev.mysql.com/downloads/mysql/)
+- **PostgreSQL** (optional) - [Download here](https://www.postgresql.org/download/)
 
 ### Step-by-Step Setup
 
@@ -52,11 +53,21 @@ npm run dev
 ```
 The frontend will start at `http://localhost:5173`
 
-#### 4. Setup Your MySQL Database (Optional)
+#### 4. Setup Your Database (Optional)
 If you want to test with sample data:
+
+For MySQL:
 ```bash
 # Import the sample database (optional)
 mysql -u root -p < sample_database_with_relationships.sql
+```
+
+For PostgreSQL:
+```bash
+# Create a database first
+createdb sample_db
+# Import the sample database (optional)
+psql -U postgres -d sample_db -f sample_database_with_relationships.sql
 ```
 
 ### 🎯 Access the Application
@@ -81,14 +92,17 @@ python clear_db.py        # Clear application database (if needed)
 
 ### 🐛 Troubleshooting
 - **Port conflicts**: If port 5173 or 5000 is busy, the apps will automatically use the next available port
-- **MySQL connection issues**: Ensure MySQL server is running and you have the correct credentials
+- **Database connection issues**: 
+  - For MySQL: Ensure MySQL server is running and you have the correct credentials
+  - For PostgreSQL: Ensure PostgreSQL server is running and you have the correct credentials
 - **Dependencies issues**: Delete `node_modules` and run `npm install` again for frontend, or recreate virtual environment for Python
 - **CORS issues**: The backend is configured to allow localhost:5173 - make sure both servers are running
 
 ## 🚀 Features Completed
 
 ### 🔗 Connection Management
-- **Multiple Database Connections**: Support for managing multiple MySQL database connections
+- **Multiple Database Connections**: Support for managing multiple database connections (MySQL and PostgreSQL)
+- **Database Type Selection**: Choose between MySQL and PostgreSQL when creating connections
 - **Connection Creation Modal**: User-friendly interface for adding new database connections
 - **Connection Testing**: Built-in connection validation before saving
 - **Active Connection Switching**: Seamless switching between different database connections
@@ -156,7 +170,9 @@ python clear_db.py        # Clear application database (if needed)
 - **FastAPI**: Modern, fast web framework for building APIs
 - **SQLAlchemy**: Robust ORM for database operations
 - **Pydantic**: Data validation and settings management
-- **MySQL Connector**: Native MySQL database connectivity
+- **Database Connectors**:
+  - MySQL Connector: Native MySQL database connectivity
+  - psycopg2: PostgreSQL database connectivity
 - **CORS Support**: Cross-origin resource sharing configuration
 - **API Endpoints**:
   - `GET /api/connections` - List all connections
@@ -167,8 +183,11 @@ python clear_db.py        # Clear application database (if needed)
 
 #### Database
 - **SQLite**: Local storage for application data (connections, queries)
-- **MySQL**: Target database system for query execution
+- **Target Databases**:
+  - **MySQL**: Primary database system for query execution
+  - **PostgreSQL**: Secondary database system with full support
 - **Drizzle ORM**: Type-safe database schema definitions
+- **Database Abstraction**: Connector pattern for unified database access
 
 ### 🔧 Development Features
 - **Hot Reload**: Development server with hot module replacement
@@ -190,10 +209,10 @@ python clear_db.py        # Clear application database (if needed)
 - **Error Sanitization**: Safe error message handling
 - **Connection Security**: Secure database credential storage
 
-## � What You Can Do
+## 🚀 What You Can Do
 
 Once both servers are running, you can:
-- **Create database connections** to your MySQL databases
+- **Create database connections** to your MySQL or PostgreSQL databases
 - **Browse database schemas** with an interactive tree view
 - **Write and execute SQL queries** with syntax highlighting
 - **View query results** in a professional data table
@@ -206,7 +225,7 @@ Once both servers are running, you can:
 
 This application is a fully functional MVP (Minimum Viable Product) with all core features implemented and working. Users can:
 
-- Connect to multiple MySQL databases
+- Connect to multiple database systems (MySQL and PostgreSQL)
 - Browse database schemas interactively
 - Write and execute SQL queries
 - View and export query results
@@ -214,3 +233,29 @@ This application is a fully functional MVP (Minimum Viable Product) with all cor
 - Switch between different database connections
 
 The application provides a professional database management experience suitable for developers, analysts, and database administrators.
+
+## 📅 Updates: July 9-10, 2025
+
+### 🔄 Multi-Database Support
+- **PostgreSQL Support**: Added full support for PostgreSQL databases alongside MySQL
+- **Database Type Selection**: Connection modal now allows selecting between MySQL and PostgreSQL
+- **Dynamic Port Assignment**: Default port changes automatically based on selected database type
+- **Unified Schema Interface**: Schema browser now works consistently with both database systems
+- **Connector Abstraction**: Created a unified database connector system for all supported databases
+
+### 🛠️ Backend Enhancements
+- **PostgreSQL Connector**: Implemented PostgreSQLConnector class using psycopg2
+- **Connector Factory Pattern**: Added dynamic connector creation based on database type
+- **Model Updates**: Added database_type field to Connection model
+- **Schema Mapping**: Updated backend to handle both snake_case and camelCase field naming
+- **Schema Normalization**: Unified table and column access across different database systems
+
+### 🧩 Frontend Improvements
+- **Database Type UI**: Added database type dropdown to connection modal
+- **Enhanced Schema Browser**: Fixed React key warnings and normalized table name access
+- **Type Handling**: Improved handling of database type field across components
+- **Error Handling**: Added more robust error handling for different database systems
+- **Debug Logging**: Added comprehensive logging for troubleshooting database connections
+
+### 📦 Dependencies
+- Added psycopg2-binary to requirements.txt for PostgreSQL support
