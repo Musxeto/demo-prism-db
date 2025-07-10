@@ -37,6 +37,13 @@ def read_connections(db: Session = Depends(get_db)):
 def create_connection(connection: schemas.ConnectionCreate, db: Session = Depends(get_db)):
     return storage.create_connection(db=db, connection=connection)
 
+@app.put("/api/connections/{connection_id}", response_model=schemas.Connection)
+def update_connection(connection_id: int, connection: schemas.ConnectionUpdate, db: Session = Depends(get_db)):
+    db_connection = storage.update_connection(db=db, connection_id=connection_id, connection=connection)
+    if db_connection is None:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    return db_connection
+
 @app.get("/api/connections/{connection_id}/schema", response_model=schemas.DatabaseSchema)
 def get_connection_schema(connection_id: int, db: Session = Depends(get_db)):
     print(f"Fetching schema for connection_id: {connection_id}")

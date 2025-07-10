@@ -9,7 +9,7 @@ def get_connection(db: Session, connection_id: int):
     return db.query(models.Connection).filter(models.Connection.id == connection_id).first()
 
 def create_connection(db: Session, connection: schemas.ConnectionCreate):
-    db_connection = models.Connection(**connection.dict())
+    db_connection = models.Connection(**connection.model_dump())
     db.add(db_connection)
     db.commit()
     db.refresh(db_connection)
@@ -19,7 +19,7 @@ def update_connection(db: Session, connection_id: int, connection: schemas.Conne
     db_connection = get_connection(db, connection_id)
     if not db_connection:
         return None
-    update_data = connection.dict(exclude_unset=True)
+    update_data = connection.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(db_connection, key, value)
     db.add(db_connection)
