@@ -4,24 +4,24 @@ import { DatabaseSchema } from "../../../shared/schema";
 import { useQueryTabsStore } from "../contexts/query-tabs-store";
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
-import { 
-  Collapsible, 
-  CollapsibleContent, 
-  CollapsibleTrigger 
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger
 } from "./ui/collapsible";
-import { 
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { 
-  ChevronRight, 
-  Database, 
-  Table, 
-  RefreshCw, 
-  Key, 
+import {
+  ChevronRight,
+  Database,
+  Table,
+  RefreshCw,
+  Key,
   Link,
   FileText,
   Eye,
@@ -33,6 +33,11 @@ import {
 } from "lucide-react";
 import { useToast } from "../hooks/use-toast";
 import { cn } from "../lib/utils";
+
+// Helper function to get table name regardless of property name
+const getTableName = (table: any): string => {
+  return table.name || table.tableName || 'unknown';
+};
 
 interface SchemaBrowserWithTabsProps {
   connectionId: number;
@@ -123,7 +128,7 @@ export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryCl
     if ((event.target as HTMLElement).closest('[data-trigger="chevron"]')) {
       return;
     }
-    
+
     handleSelectFromTable(tableName);
   };
 
@@ -158,6 +163,13 @@ export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryCl
     }
     return count.toString();
   };
+
+  React.useEffect(() => {
+    if (schema) {
+      console.log("Schema received:", schema);
+      console.log("Tables in schema:", schema.tables);
+    }
+  }, [schema]);
 
   if (isLoading) {
     return (
@@ -214,7 +226,7 @@ export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryCl
             <Button
               variant="ghost"
               size="sm"
-              onClick={onViewHistoryClick}
+              onClick={() => onViewHistoryClick?.()}
               className="h-6 w-6 p-0"
               title="View Query History"
             >
@@ -245,8 +257,8 @@ export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryCl
         <div className="space-y-2 py-2">
           <Collapsible defaultOpen>
             <CollapsibleTrigger className="flex items-center w-full hover:bg-slate-50 px-2 py-1 rounded text-sm font-medium text-slate-700">
-              <ChevronRight 
-                className="w-4 h-4 mr-2 transition-transform data-[state=open]:rotate-90" 
+              <ChevronRight
+                className="w-4 h-4 mr-2 transition-transform data-[state=open]:rotate-90"
                 data-trigger="chevron"
               />
               <Database className="w-4 h-4 mr-2 text-slate-500" />
@@ -256,82 +268,85 @@ export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryCl
               </span>
             </CollapsibleTrigger>
             <CollapsibleContent className="ml-8 mt-1 space-y-1">
-              {schema.tables.map((table) => (
-                <Collapsible
-                  key={table.name}
-                  open={openTables.has(table.name)}
-                  onOpenChange={() => toggleTable(table.name)}
-                >
-                  <div className="flex items-center w-full group">
-                    <CollapsibleTrigger 
-                      className="flex items-center flex-1 hover:bg-slate-50 px-2 py-1 rounded text-sm text-slate-600"
-                      onClick={(e) => handleTableClick(table.name, e)}
-                    >
-                      <ChevronRight 
-                        className="w-3 h-3 mr-2 transition-transform data-[state=open]:rotate-90" 
-                        data-trigger="chevron"
-                      />
-                      <Table className="w-4 h-4 mr-2 text-amber-500" />
-                      <span className="font-medium group-hover:text-blue-600 cursor-pointer">
-                        {table.name}
-                      </span>
-                      <span className="ml-auto text-xs text-slate-400">
-                        {formatRowCount(table.rowCount)}
-                      </span>
-                    </CollapsibleTrigger>
-
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <MoreHorizontal className="h-3 w-3" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleSelectFromTable(table.name)}>
-                          <Eye className="h-3 w-3 mr-2" />
-                          Select Data
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleDescribeTable(table.name)}>
-                          <FileText className="h-3 w-3 mr-2" />
-                          Describe Table
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleShowCreateTable(table.name)}>
-                          <Database className="h-3 w-3 mr-2" />
-                          Show CREATE
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => handleCopyTableName(table.name)}>
-                          <Copy className="h-3 w-3 mr-2" />
-                          Copy Name
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-
-                  <CollapsibleContent className="ml-6 mt-1 space-y-1">
-                    {table.columns.map((column) => (
-                      <div
-                        key={column.name}
-                        className="flex items-center px-2 py-1 text-xs text-slate-500 hover:bg-slate-50 rounded cursor-pointer"
-                        title={`${column.name} (${column.type})${column.isPrimaryKey ? ' - Primary Key' : ''}${column.isForeignKey ? ' - Foreign Key' : ''}`}
+              {schema.tables && schema.tables.map((table) => {
+                const tableName = getTableName(table);
+                return (
+                  <Collapsible
+                    key={`table-${tableName}`}
+                    open={openTables.has(tableName)}
+                    onOpenChange={() => toggleTable(tableName)}
+                  >
+                    <div className="flex items-center w-full group">
+                      <CollapsibleTrigger
+                        className="flex items-center flex-1 hover:bg-slate-50 px-2 py-1 rounded text-sm text-slate-600"
+                        onClick={(e) => handleTableClick(tableName, e)}
                       >
-                        {getColumnIcon(column)}
-                        <span className={`font-medium ${column.isPrimaryKey ? 'text-blue-600' : ''}`}>
-                          {column.name}
+                        <ChevronRight
+                          className="w-3 h-3 mr-2 transition-transform data-[state=open]:rotate-90"
+                          data-trigger="chevron"
+                        />
+                        <Table className="w-4 h-4 mr-2 text-amber-500" />
+                        <span className="font-medium group-hover:text-blue-600 cursor-pointer">
+                          {tableName}
                         </span>
-                        <span className="ml-2 text-slate-400">{column.type}</span>
-                        {!column.nullable && (
-                          <span className="ml-1 text-red-400 text-xs">*</span>
-                        )}
-                      </div>
-                    ))}
-                  </CollapsibleContent>
-                </Collapsible>
-              ))}
+                        <span className="ml-auto text-xs text-slate-400">
+                          {formatRowCount(table.rowCount)}
+                        </span>
+                      </CollapsibleTrigger>
+
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <MoreHorizontal className="h-3 w-3" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleSelectFromTable(tableName)}>
+                            <Eye className="h-3 w-3 mr-2" />
+                            Select Data
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleDescribeTable(tableName)}>
+                            <FileText className="h-3 w-3 mr-2" />
+                            Describe Table
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleShowCreateTable(tableName)}>
+                            <Database className="h-3 w-3 mr-2" />
+                            Show CREATE
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => handleCopyTableName(tableName)}>
+                            <Copy className="h-3 w-3 mr-2" />
+                            Copy Name
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+
+                    <CollapsibleContent className="ml-6 mt-1 space-y-1">
+                      {table.columns && table.columns.map((column) => (
+                        <div
+                          key={`${tableName}-${column.name}`}
+                          className="flex items-center px-2 py-1 text-xs text-slate-500 hover:bg-slate-50 rounded cursor-pointer"
+                          title={`${column.name} (${column.type})${column.isPrimaryKey ? ' - Primary Key' : ''}${column.isForeignKey ? ' - Foreign Key' : ''}`}
+                        >
+                          {getColumnIcon(column)}
+                          <span className={`font-medium ${column.isPrimaryKey ? 'text-blue-600' : ''}`}>
+                            {column.name}
+                          </span>
+                          <span className="ml-2 text-slate-400">{column.type}</span>
+                          {!column.nullable && (
+                            <span className="ml-1 text-red-400 text-xs">*</span>
+                          )}
+                        </div>
+                      ))}
+                    </CollapsibleContent>
+                  </Collapsible>
+                );
+              })}
             </CollapsibleContent>
           </Collapsible>
         </div>

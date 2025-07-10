@@ -9,6 +9,7 @@ class ConnectionBase(BaseModel):
     database: str
     username: str
     password: str
+    databaseType: Optional[str] = "mysql"  # Default to MySQL if not specified
 
 class ConnectionCreate(ConnectionBase):
     pass
@@ -20,6 +21,7 @@ class ConnectionUpdate(BaseModel):
     database: Optional[str] = None
     username: Optional[str] = None
     password: Optional[str] = None
+    databaseType: Optional[str] = None
     is_active: Optional[bool] = None
 
 class Connection(ConnectionBase):
@@ -27,8 +29,17 @@ class Connection(ConnectionBase):
     is_active: Optional[bool] = True
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True,
+    }
+    
+    # For debugging purposes
+    def __init__(self, **data):
+        super().__init__(**data)
+        print(f"Connection model init with data: {data}")
+        if 'database_type' in data:
+            print(f"Setting databaseType={data['database_type']} from database_type")
+            self.databaseType = data['database_type']
 
 class QueryBase(BaseModel):
     sql: str
@@ -41,8 +52,9 @@ class Query(QueryBase):
     connection_id: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True
+    }
 
 class DatabaseSchema(BaseModel):
     tables: list
@@ -87,6 +99,7 @@ class ConnectionTest(BaseModel):
     database: str
     username: str
     password: str
+    databaseType: Optional[str] = "mysql"
 
 
 class ColumnSchema(BaseModel):

@@ -13,6 +13,7 @@ class Connection(Base):
     username = Column(String)
     password = Column(String)
     database = Column(String)
+    database_type = Column(String, default="mysql")  # Added database_type column matching the migration script
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     

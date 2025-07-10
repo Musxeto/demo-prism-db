@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -26,6 +27,7 @@ export default function ConnectionModal({
     database: "",
     username: "",
     password: "",
+    databaseType: "mysql",
     isActive: true,
   });
   
@@ -63,6 +65,7 @@ export default function ConnectionModal({
       database: "",
       username: "",
       password: "",
+      databaseType: "mysql",
       isActive: true,
     });
   };
@@ -129,15 +132,32 @@ export default function ConnectionModal({
             </div>
           </div>
           
-          <div>
-            <Label htmlFor="database">Database Name *</Label>
-            <Input
-              id="database"
-              value={formData.database}
-              onChange={(e) => setFormData(prev => ({ ...prev, database: e.target.value }))}
-              placeholder="database_name"
-              required
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="database">Database Name *</Label>
+              <Input
+                id="database"
+                value={formData.database}
+                onChange={(e) => setFormData(prev => ({ ...prev, database: e.target.value }))}
+                placeholder="database_name"
+                required
+              />
+            </div>
+            <div>
+              <Label htmlFor="databaseType">Database Type *</Label>
+              <Select 
+                value={formData.databaseType} 
+                onValueChange={(value) => setFormData(prev => ({ ...prev, databaseType: value, port: value === 'postgres' ? 5432 : 3306 }))}
+              >
+                <SelectTrigger id="databaseType">
+                  <SelectValue placeholder="Select database type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="mysql">MySQL</SelectItem>
+                  <SelectItem value="postgres">PostgreSQL</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           
           <div className="grid grid-cols-2 gap-4">

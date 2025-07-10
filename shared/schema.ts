@@ -10,6 +10,7 @@ export const connections = pgTable("connections", {
   database: text("database").notNull(),
   username: text("username").notNull(),
   password: text("password").notNull(),
+  databaseType: text("database_type").notNull().default("mysql"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

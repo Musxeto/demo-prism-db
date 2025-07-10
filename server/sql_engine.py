@@ -1,9 +1,8 @@
 import re
 import time
-import mysql.connector
 from typing import List, Dict, Any, Optional, Tuple
-from mysql.connector import Error
 from schemas import QueryResult
+from db_connectors import create_connector
 
 class SQLQueryEngine:
     """Enhanced SQL query execution engine with support for all SQL statement types"""
@@ -112,40 +111,63 @@ class SQLQueryEngine:
         is_dangerous, warnings = self.is_dangerous_query(sql)
         
         try:
-            connection = mysql.connector.connect(**self.connection_config)
-            cursor = connection.cursor()
+            # Create correct database config for connector
+            db_config = {
+                "host": self.connection_config.get("host"),
+                "port": self.connection_config.get("port"),
+                "database": self.connection_config.get("database"),
+                "username": self.connection_config.get("user"),
+                "password": self.connection_config.get("password"),
+                "database_type": self.connection_config.get("database_type", "mysql")
+            }
             
-            # Set query timeout
-            cursor.execute(f"SET SESSION max_execution_time={self.timeout * 1000}")
+            # Create the appropriate connector
+            connector = create_connector(db_config)
             
-            if stmt_type == 'select' or stmt_type in ['show', 'describe', 'explain']:
-                return self._execute_select_query(cursor, sql, page, page_size, start_time, warnings, is_dangerous)
-            else:
-                return self._execute_write_query(cursor, connection, sql, stmt_type, start_time, warnings, is_dangerous)
-                
-        except mysql.connector.Error as e:
+            # Execute the query using the connector
+            result = connector.execute_query(sql)
+            
+            # Calculate execution time
             execution_time = (time.time() - start_time) * 1000
-            return QueryResult(
-                type="error",
-                message=str(e),
-                executionTimeMs=execution_time,
-                warnings=warnings,
-                isDangerous=is_dangerous
-            )
+            if "executionTimeMs" not in result:
+                result["executionTimeMs"] = execution_time
+                
+            # Add warnings and dangerous flag
+            result["warnings"] = warnings
+            result["isDangerous"] = is_dangerous
+            
+            # Add pagination if this is a select query
+            if result["type"] == "select" and page_size > 0:
+                total_rows = len(result.get("rows", []))
+                total_pages = (total_rows + page_size - 1) // page_size if total_rows > 0 else 1
+                
+                start_index = (page - 1) * page_size
+                end_index = min(start_index + page_size, total_rows)
+                
+                result["totalRows"] = total_rows
+                result["page"] = page
+                result["pageSize"] = page_size
+                result["totalPages"] = total_pages
+                
+                # Paginate the results
+                if "rows" in result:
+                    result["rows"] = result["rows"][start_index:end_index]
+            
+            # Disconnect the connector
+            connector.disconnect()
+            
+            # Convert to QueryResult
+            return QueryResult(**result)
+                
         except Exception as e:
             execution_time = (time.time() - start_time) * 1000
             return QueryResult(
                 type="error",
-                message=f"Unexpected error: {str(e)}",
+                message=f"Error executing query: {str(e)}",
                 executionTimeMs=execution_time,
                 warnings=warnings,
                 isDangerous=is_dangerous
             )
-        finally:
-            if 'cursor' in locals():
-                cursor.close()
-            if 'connection' in locals():
-                connection.close()
     
     def _execute_select_query(self, cursor, sql: str, page: int, page_size: int, 
                             start_time: float, warnings: List[str], is_dangerous: bool) -> QueryResult:

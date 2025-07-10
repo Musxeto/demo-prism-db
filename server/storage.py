@@ -6,22 +6,55 @@ def get_connections(db: Session):
     return db.query(models.Connection).all()
 
 def get_connection(db: Session, connection_id: int):
-    return db.query(models.Connection).filter(models.Connection.id == connection_id).first()
+    # Get the connection from database
+    db_conn = db.query(models.Connection).filter(models.Connection.id == connection_id).first()
+    
+    # If found, ensure database_type attribute is correctly mapped to databaseType for API use
+    if db_conn and hasattr(db_conn, "database_type"):
+        # Set attribute explicitly for access in other functions
+        db_conn.databaseType = db_conn.database_type
+        print(f"Connection #{db_conn.id} database type: {db_conn.database_type} (mapped to databaseType: {db_conn.databaseType})")
+    
+    return db_conn
 
 def create_connection(db: Session, connection: schemas.ConnectionCreate):
-    db_connection = models.Connection(**connection.model_dump())
+    # Convert connection data to dict and map camelCase to snake_case for database_type
+    connection_data = connection.model_dump()
+    
+    # Map databaseType to database_type if present
+    if "databaseType" in connection_data:
+        db_type = connection_data.pop("databaseType")
+        print(f"Creating connection with databaseType: {db_type}")
+        connection_data["database_type"] = db_type
+    else:
+        print("Warning: databaseType not provided in connection data")
+    
+    db_connection = models.Connection(**connection_data)
     db.add(db_connection)
     db.commit()
     db.refresh(db_connection)
+    
+    # For API consistency, add databaseType attribute to match what the API expects
+    if hasattr(db_connection, "database_type"):
+        db_connection.databaseType = db_connection.database_type
+        print(f"Created connection with database_type: {db_connection.database_type} (mapped to databaseType: {db_connection.databaseType})")
+    
     return db_connection
 
 def update_connection(db: Session, connection_id: int, connection: schemas.ConnectionUpdate):
     db_connection = get_connection(db, connection_id)
     if not db_connection:
         return None
+    
     update_data = connection.model_dump(exclude_unset=True)
+    
+    # Map databaseType to database_type if present
+    if "databaseType" in update_data:
+        update_data["database_type"] = update_data.pop("databaseType")
+    
     for key, value in update_data.items():
         setattr(db_connection, key, value)
+    
     db.add(db_connection)
     db.commit()
     db.refresh(db_connection)
@@ -40,51 +73,34 @@ def get_schema(db: Session, connection_id: int):
         return None
     
     try:
-        mydb = mysql.connector.connect(
-            host=connection.host,
-            user=connection.username,
-            password=connection.password,
-            database=connection.database
-        )
-        cursor = mydb.cursor()
-        
-        # Get all table names
-        cursor.execute("SHOW TABLES")
-        table_names = [table[0] for table in cursor.fetchall()]
-        
-        tables = []
-        for table_name in table_names:
-            # Get row count
-            cursor.execute(f"SELECT COUNT(*) FROM `{table_name}`")
-            row_count = cursor.fetchone()[0]
-            
-            # Get column information
-            cursor.execute(f"DESCRIBE `{table_name}`")
-            columns_info = cursor.fetchall()
-            
-            columns = []
-            for col_info in columns_info:
-                columns.append({
-                    "name": col_info[0],
-                    "type": col_info[1],
-                    "nullable": col_info[2] == "YES",
-                    "isPrimaryKey": col_info[3] == "PRI",
-                    "isForeignKey": False  # Would need additional query to determine this
-                })
-            
-            tables.append({
-                "name": table_name,
-                "rowCount": row_count,
-                "columns": columns
-            })
-        
-        mydb.close()
-        return {
-            "name": connection.database,
-            "tables": tables
+        from db_connectors import create_connector
+
+        # Prepare connection config for the connector
+        connection_config = {
+            "host": connection.host,
+            "port": connection.port,
+            "database": connection.database,
+            "username": connection.username,
+            "password": connection.password,
+            "database_type": connection.database_type if hasattr(connection, 'database_type') else "mysql"
         }
-    except mysql.connector.Error as err:
+
+        # Create the appropriate connector
+        connector = create_connector(connection_config)
+        
+        # Get schema using the connector
+        schema_info = connector.get_schema()
+        
+        # Disconnect when done
+        connector.disconnect()
+        
+        return schema_info
+        
+    except Exception as err:
         # Handle connection errors
+        import traceback
+        print(f"Error getting schema: {str(err)}")
+        print(traceback.format_exc())
         return {"error": str(err)}
 
 
@@ -103,6 +119,7 @@ def execute_query(db: Session, connection_id: int, sql: str, page: int = 1, page
         'database': connection.database,
         'user': connection.username,
         'password': connection.password,
+        'database_type': connection.database_type if hasattr(connection, 'database_type') else "mysql",
         'autocommit': False,
         'raise_on_warnings': True
     }
@@ -137,98 +154,59 @@ def get_queries(db: Session):
 
 def test_and_load_schema(connection_test: schemas.ConnectionTest):
     try:
-        mydb = mysql.connector.connect(
-            host=connection_test.host,
-            user=connection_test.username,
-            password=connection_test.password,
-            database=connection_test.database,
-        )
-        cursor = mydb.cursor(dictionary=True)
+        from db_connectors import create_connector
 
-        # Get all table names
-        cursor.execute("SHOW TABLES")
-        tables = [table[f"Tables_in_{connection_test.database}"] for table in cursor.fetchall()]
+        # Prepare connection config for the connector
+        connection_config = {
+            "host": connection_test.host,
+            "port": connection_test.port,
+            "database": connection_test.database,
+            "username": connection_test.username,
+            "password": connection_test.password,
+            "database_type": connection_test.databaseType if hasattr(connection_test, 'databaseType') else "mysql"
+        }
+        
+        # Print the database type for debugging
+        print(f"Using database type: {connection_config['database_type']}")
 
-        response_tables = []
+        # Create the appropriate connector
+        connector = create_connector(connection_config)
+        
+        # Test connection
+        success, message = connector.test_connection()
+        if not success:
+            return {"error": message}
+            
+        # Get schema using the connector
+        schema_info = connector.get_schema()
+        
+        # Extract relationships from schema
         relationships = []
-
-        for table_name in tables:
-            # Get columns details
-            cursor.execute(f"""
-                SELECT
-                    c.COLUMN_NAME as `name`,
-                    c.COLUMN_TYPE as `type`,
-                    (c.IS_NULLABLE = 'YES') as `nullable`,
-                    IF(kcu.CONSTRAINT_NAME = 'PRIMARY', TRUE, FALSE) as `isPrimaryKey`,
-                    IF(kcu.REFERENCED_TABLE_NAME IS NOT NULL, TRUE, FALSE) as `isForeignKey`,
-                    kcu.REFERENCED_TABLE_NAME as `referencedTable`,
-                    kcu.REFERENCED_COLUMN_NAME as `referencedColumn`
-                FROM
-                    INFORMATION_SCHEMA.COLUMNS c
-                LEFT JOIN
-                    INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
-                ON
-                    c.TABLE_SCHEMA = kcu.TABLE_SCHEMA AND c.TABLE_NAME = kcu.TABLE_NAME AND c.COLUMN_NAME = kcu.COLUMN_NAME
-                WHERE
-                    c.TABLE_SCHEMA = '{connection_test.database}' AND c.TABLE_NAME = '{table_name}'
-            """)
-            columns_data = cursor.fetchall()
-
-            columns = []
-            for col in columns_data:
-                references = None
-                if col['isForeignKey']:
-                    references = {
-                        "table": col['referencedTable'],
-                        "column": col['referencedColumn'],
-                    }
-                    relationships.append(
-                        {
-                            "fromTable": table_name,
-                            "fromColumn": col['name'],
-                            "toTable": col['referencedTable'],
-                            "toColumn": col['referencedColumn'],
-                            "type": "many-to-one",  # This is a simplification
-                        }
-                    )
-                columns.append(
-                    {
-                        "name": col['name'],
-                        "type": col['type'],
-                        "nullable": bool(col['nullable']),
-                        "isPrimaryKey": bool(col['isPrimaryKey']),
-                        "isForeignKey": bool(col['isForeignKey']),
-                        "references": references,
-                    }
-                )
-
-            # Get row count
-            cursor.execute(f"SELECT COUNT(*) as count FROM `{table_name}`")
-            row_count = cursor.fetchone()['count']
-
-            # Get sample rows
-            cursor.execute(f"SELECT * FROM `{table_name}` LIMIT 10")
-            sample_rows = cursor.fetchall()
-
-            response_tables.append(
-                {
-                    "tableName": table_name,
-                    "rowCount": row_count,
-                    "columns": columns,
-                    "sampleRows": sample_rows,
-                }
-            )
-
-        mydb.close()
-
+        for table in schema_info["tables"]:
+            for column in table["columns"]:
+                if column["isForeignKey"] and column["references"]:
+                    relationships.append({
+                        "fromTable": table["tableName"],
+                        "fromColumn": column["name"],
+                        "toTable": column["references"]["table"],
+                        "toColumn": column["references"]["column"],
+                        "type": "many-to-one",  # Simplified relationship type
+                    })
+        
+        # Disconnect when done
+        connector.disconnect()
+        
         return {
             "database": connection_test.database,
-            "tables": response_tables,
+            "tables": schema_info["tables"],
             "relationships": relationships,
         }
 
-    except mysql.connector.Error as err:
-        raise Exception(str(err))
+    except Exception as err:
+        import traceback
+        print(f"Error in test_and_load_schema: {str(err)}")
+        print(traceback.format_exc())
+        return {"error": str(err)}
 
 def get_relationships(db: Session, connection_id: int):
     """Extract foreign key relationships from database schema"""
@@ -237,122 +215,83 @@ def get_relationships(db: Session, connection_id: int):
         return None
     
     try:
-        mydb = mysql.connector.connect(
-            host=connection.host,
-            user=connection.username,
-            password=connection.password,
-            database=connection.database
-        )
-        cursor = mydb.cursor()
+        from db_connectors import create_connector
+
+        # Prepare connection config for the connector
+        connection_config = {
+            "host": connection.host,
+            "port": connection.port,
+            "database": connection.database,
+            "username": connection.username,
+            "password": connection.password,
+            "database_type": connection.database_type if hasattr(connection, 'database_type') else "mysql"
+        }
+
+        # Create the appropriate connector
+        connector = create_connector(connection_config)
         
-        # Get all table names
-        cursor.execute("SHOW TABLES")
-        table_names = [table[0] for table in cursor.fetchall()]
+        # Get schema using the connector
+        schema_info = connector.get_schema()
         
         tables = []
         relationships = []
         
-        # First, get all foreign key relationships from the schema
-        cursor.execute(f"""
-            SELECT 
-                kcu.TABLE_NAME,
-                kcu.COLUMN_NAME,
-                kcu.REFERENCED_TABLE_NAME,
-                kcu.REFERENCED_COLUMN_NAME,
-                kcu.CONSTRAINT_NAME
-            FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
-            WHERE kcu.TABLE_SCHEMA = %s
-                AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
-                AND kcu.REFERENCED_COLUMN_NAME IS NOT NULL
-        """, (connection.database,))
-        
-        foreign_key_data = cursor.fetchall()
-        print(f"Found {len(foreign_key_data)} foreign key relationships")
-        for fk in foreign_key_data:
-            print(f"FK: {fk}")
-        
-        # Build relationships list
-        for fk_info in foreign_key_data:
-            table_name, column_name, ref_table, ref_column, constraint_name = fk_info
-            relationships.append({
-                "fromTable": table_name,
-                "fromColumn": column_name,
-                "toTable": ref_table,
-                "toColumn": ref_column,
-                "type": "foreign_key",
-                "constraintName": constraint_name
-            })
-        
-        # Now get table and column information
-        for table_name in table_names:
-            # Get row count
-            cursor.execute(f"SELECT COUNT(*) FROM `{table_name}`")
-            row_count = cursor.fetchone()[0]
-            
-            # Get column information
-            cursor.execute(f"""
-                SELECT 
-                    c.COLUMN_NAME,
-                    c.DATA_TYPE,
-                    c.IS_NULLABLE,
-                    c.COLUMN_KEY,
-                    c.EXTRA
-                FROM INFORMATION_SCHEMA.COLUMNS c
-                WHERE c.TABLE_SCHEMA = %s AND c.TABLE_NAME = %s
-                ORDER BY c.ORDINAL_POSITION
-            """, (connection.database, table_name))
-            
-            columns_info = cursor.fetchall()
+        # Process each table in the schema
+        for table in schema_info["tables"]:
+            table_name = table["tableName"]
             primary_keys = []
             foreign_keys = []
             columns = []
             
-            for col_info in columns_info:
-                column_name, data_type, is_nullable, column_key, extra = col_info
+            # Process columns
+            for column in table["columns"]:
+                column_name = column["name"]
                 
-                is_primary = column_key == "PRI"
-                
-                # Check if this column is a foreign key by looking in our foreign_key_data
-                is_foreign = False
-                fk_reference = None
-                for fk_info in foreign_key_data:
-                    if fk_info[0] == table_name and fk_info[1] == column_name:
-                        is_foreign = True
-                        fk_reference = {
-                            "table": fk_info[2],
-                            "column": fk_info[3]
-                        }
-                        foreign_keys.append({
-                            "column": column_name,
-                            "references": fk_reference
-                        })
-                        break
-                
-                if is_primary:
+                if column["isPrimaryKey"]:
                     primary_keys.append(column_name)
+                
+                if column["isForeignKey"] and column["references"]:
+                    foreign_keys.append({
+                        "column": column_name,
+                        "references": column["references"]
+                    })
+                    
+                    # Add to relationships list
+                    relationships.append({
+                        "fromTable": table_name,
+                        "fromColumn": column_name,
+                        "toTable": column["references"]["table"],
+                        "toColumn": column["references"]["column"],
+                        "type": "foreign_key",
+                        "constraintName": f"fk_{table_name}_{column_name}"  # Generic constraint name
+                    })
                 
                 columns.append({
                     "name": column_name,
-                    "type": data_type,
-                    "nullable": is_nullable == "YES",
-                    "isPrimaryKey": is_primary,
-                    "isForeignKey": is_foreign,
-                    "references": fk_reference
+                    "type": column["type"],
+                    "nullable": column["nullable"],
+                    "isPrimaryKey": column["isPrimaryKey"],
+                    "isForeignKey": column["isForeignKey"],
+                    "references": column["references"]
                 })
             
             tables.append({
                 "name": table_name,
-                "rowCount": row_count,
+                "rowCount": table["rowCount"],
                 "columns": columns,
                 "primaryKeys": primary_keys,
                 "foreignKeys": foreign_keys
             })
         
-        mydb.close()
+        # Disconnect when done
+        connector.disconnect()
         return {
             "database": connection.database,
             "tables": tables,
             "relationships": relationships
         }
-    except mysql.connector.Error as err:
+    except Exception as err:
+        import traceback
+        print(f"Error getting relationships: {str(err)}")
+        print(traceback.format_exc())
         return {"error": str(err)}
