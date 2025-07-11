@@ -5,12 +5,10 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryProvider } from "@/contexts/query-context";
 import DatabaseStudio from "@/pages/database-studio";
-import { ConnectionDebugPanel } from "@/components/connection-debug-panel";
 
 function Router() {
   return (
     <Switch>
-      <Route path="/debug" component={() => <div className="min-h-screen bg-background"><ConnectionDebugPanel /></div>} />
       <Route path="/" component={DatabaseStudio} />
       <Route path="/studio" component={DatabaseStudio} />
     </Switch>

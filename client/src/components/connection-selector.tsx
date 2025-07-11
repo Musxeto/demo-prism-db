@@ -85,10 +85,7 @@ export default function ConnectionSelector({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    console.log('Connection selector delete button clicked for:', selectedConnection);
-                    onDeleteClick(selectedConnection);
-                  }}
+                  onClick={() => onDeleteClick(selectedConnection)}
                   className="flex items-center gap-2 h-8 px-3 text-xs text-destructive hover:text-destructive"
                 >
                   <Trash2 className="h-3 w-3" />
