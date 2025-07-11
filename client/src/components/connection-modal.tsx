@@ -147,7 +147,12 @@ export default function ConnectionModal({
               <Label htmlFor="databaseType">Database Type *</Label>
               <Select 
                 value={formData.databaseType} 
-                onValueChange={(value) => setFormData(prev => ({ ...prev, databaseType: value, port: value === 'postgres' ? 5432 : 3306 }))}
+                onValueChange={(value) => setFormData(prev => ({ 
+                  ...prev, 
+                  databaseType: value, 
+                  port: value === 'postgres' ? 5432 : 
+                        value === 'mongodb' ? 27017 : 3306 
+                }))}
               >
                 <SelectTrigger id="databaseType">
                   <SelectValue placeholder="Select database type" />
@@ -155,6 +160,7 @@ export default function ConnectionModal({
                 <SelectContent>
                   <SelectItem value="mysql">MySQL</SelectItem>
                   <SelectItem value="postgres">PostgreSQL</SelectItem>
+                  <SelectItem value="mongodb">MongoDB</SelectItem>
                 </SelectContent>
               </Select>
             </div>

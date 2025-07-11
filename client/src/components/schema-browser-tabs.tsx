@@ -81,30 +81,58 @@ export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryCl
   };
 
   const handleSelectFromTable = (tableName: string) => {
-    const query = `SELECT * FROM ${tableName} LIMIT 100;`;
+    // Check if this is a MongoDB collection
+    const table = schema?.tables.find(t => getTableName(t) === tableName);
+    const isMongoDB = table && typeof table === 'object' && 'isMongoDB' in table && table.isMongoDB === true;
+    
+    const query = isMongoDB 
+      ? `db.${tableName}.find({})`  // MongoDB query
+      : `SELECT * FROM ${tableName} LIMIT 100;`;  // SQL query
+      
     addTab(connectionId, query, tableName);
     toast({
       title: "Query tab opened",
-      description: `SELECT query created for table "${tableName}"`,
+      description: `${isMongoDB ? 'Find' : 'SELECT'} query created for ${isMongoDB ? 'collection' : 'table'} "${tableName}"`,
     });
   };
 
   const handleDescribeTable = (tableName: string) => {
-    const query = `DESCRIBE ${tableName};`;
+    // Check if this is a MongoDB collection
+    const table = schema?.tables.find(t => getTableName(t) === tableName);
+    const isMongoDB = table && typeof table === 'object' && 'isMongoDB' in table && table.isMongoDB === true;
+    
+    const query = isMongoDB
+      ? `// Collection: ${tableName}\n// Sample document structure shown in schema browser`
+      : `DESCRIBE ${tableName};`;
+      
     addTab(connectionId, query, `Describe ${tableName}`);
     toast({
       title: "Describe query created",
-      description: `Table structure query for "${tableName}"`,
+      description: `${isMongoDB ? 'Collection structure' : 'Table structure'} query for "${tableName}"`,
     });
   };
 
   const handleShowCreateTable = (tableName: string) => {
-    const query = `SHOW CREATE TABLE ${tableName};`;
-    addTab(connectionId, query, `Create ${tableName}`);
-    toast({
-      title: "Create table query opened",
-      description: `DDL query for table "${tableName}"`,
-    });
+    // Check if this is a MongoDB collection
+    const table = schema?.tables.find(t => getTableName(t) === tableName);
+    const isMongoDB = table && typeof table === 'object' && 'isMongoDB' in table && table.isMongoDB === true;
+    
+    if (isMongoDB) {
+      // For MongoDB, show collection stats or indexes
+      const query = `// MongoDB Collection: ${tableName}\n// Use db.${tableName}.getIndexes() to view indexes\n// Use db.${tableName}.stats() to view collection stats`;
+      addTab(connectionId, query, `Info ${tableName}`);
+      toast({
+        title: "Collection info opened",
+        description: `Information query for collection "${tableName}"`,
+      });
+    } else {
+      const query = `SHOW CREATE TABLE ${tableName};`;
+      addTab(connectionId, query, `Create ${tableName}`);
+      toast({
+        title: "Create table query opened",
+        description: `DDL query for table "${tableName}"`,
+      });
+    }
   };
 
   const handleCopyTableName = async (tableName: string) => {
@@ -138,6 +166,10 @@ export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryCl
     }
     if (column.isForeignKey) {
       return <Link className="w-3 h-3 mr-2 text-purple-500" />;
+    }
+    // MongoDB dynamic type
+    if (column.type === "DYNAMIC") {
+      return <div className="w-3 h-3 mr-2 rounded bg-orange-500" title="Dynamic type (MongoDB)"></div>;
     }
     if (column.type.includes("INT") || column.type.includes("DECIMAL") || column.type.includes("NUMERIC")) {
       return <div className="w-3 h-3 mr-2 rounded bg-green-500"></div>;
@@ -264,12 +296,13 @@ export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryCl
               <Database className="w-4 h-4 mr-2 text-slate-500" />
               {schema.name || 'Database'}
               <span className="ml-auto text-xs text-slate-400">
-                {schema.tables.length} tables
+                {schema.tables.length} {schema.tables.some(t => typeof t === 'object' && 'isMongoDB' in t && t.isMongoDB === true) ? 'items' : 'tables'}
               </span>
             </CollapsibleTrigger>
             <CollapsibleContent className="ml-8 mt-1 space-y-1">
               {schema.tables && schema.tables.map((table) => {
                 const tableName = getTableName(table);
+                const isMongoDB = table && typeof table === 'object' && 'isMongoDB' in table && table.isMongoDB === true;
                 return (
                   <Collapsible
                     key={`table-${tableName}`}
@@ -285,10 +318,15 @@ export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryCl
                           className="w-3 h-3 mr-2 transition-transform data-[state=open]:rotate-90"
                           data-trigger="chevron"
                         />
-                        <Table className="w-4 h-4 mr-2 text-amber-500" />
+                        <Table className={`w-4 h-4 mr-2 ${isMongoDB ? 'text-green-500' : 'text-amber-500'}`} />
                         <span className="font-medium group-hover:text-blue-600 cursor-pointer">
                           {tableName}
                         </span>
+                        {isMongoDB && (
+                          <span className="ml-2 text-xs bg-green-100 text-green-700 px-1 py-0.5 rounded">
+                            MongoDB
+                          </span>
+                        )}
                         <span className="ml-auto text-xs text-slate-400">
                           {formatRowCount(table.rowCount)}
                         </span>
@@ -307,15 +345,15 @@ export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryCl
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onClick={() => handleSelectFromTable(tableName)}>
                             <Eye className="h-3 w-3 mr-2" />
-                            Select Data
+                            {isMongoDB ? 'Find Documents' : 'Select Data'}
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleDescribeTable(tableName)}>
                             <FileText className="h-3 w-3 mr-2" />
-                            Describe Table
+                            {isMongoDB ? 'Schema Info' : 'Describe Table'}
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleShowCreateTable(tableName)}>
                             <Database className="h-3 w-3 mr-2" />
-                            Show CREATE
+                            {isMongoDB ? 'Collection Info' : 'Show CREATE'}
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem onClick={() => handleCopyTableName(tableName)}>

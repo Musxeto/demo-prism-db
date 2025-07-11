@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useCallback, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { QueryResult } from "../../../shared/schema";
 import { useQueryTabsStore, QueryTab } from "../contexts/query-tabs-store";
+import { useConnection } from "../hooks/use-connections";
 import { Button } from "./ui/button";
 import { Play, Loader2, AlertCircle, Clock, Shield, FileText, X, AlertTriangle } from "lucide-react";
 import MonacoEditor, { MonacoEditorRef } from "./ui/monaco-editor";
@@ -28,6 +29,10 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
     title: string;
     description: string;
   } | null>(null);
+
+  // Get connection information
+  const { data: connection } = useConnection(tab.connectionId);
+  const isMongoDB = connection?.databaseType === 'mongodb';
 
   // Custom Error Popup Component
   const ErrorPopup = ({ 
@@ -79,30 +84,54 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
 
   // Detect dangerous and multi-statement queries
   const analyzeQuery = (sql: string) => {
-    const statements = splitSQLStatements(sql);
-    const dangerousPatterns = [
-      /DROP\s+DATABASE/i,
-      /DROP\s+SCHEMA/i,
-      /TRUNCATE\s+TABLE/i,
-      /DELETE\s+FROM\s+\w+\s*(?:;|$)/i, // DELETE without WHERE
-      /UPDATE\s+\w+\s+SET\s+.*?(?:;|$)(?!.*WHERE)/i, // UPDATE without WHERE
-    ];
+    if (isMongoDB) {
+      // MongoDB query analysis
+      const isMultiStatement = sql.includes('\n') && sql.trim().split('\n').filter(line => line.trim() && !line.trim().startsWith('//')).length > 1;
+      
+      // MongoDB dangerous patterns
+      const isDangerous = /\b(drop|dropDatabase|deleteMany|updateMany)\s*\(/i.test(sql);
+      
+      const warnings: string[] = [];
+      if (isDangerous) {
+        if (/drop\s*\(/i.test(sql)) warnings.push("This query contains DROP operations!");
+        if (/dropDatabase\s*\(/i.test(sql)) warnings.push("This query will DROP an entire database!");
+        if (/deleteMany\s*\(/i.test(sql)) warnings.push("This query will delete multiple documents!");
+        if (/updateMany\s*\(/i.test(sql)) warnings.push("This query will update multiple documents!");
+      }
+      
+      if (isMultiStatement) {
+        const statements = sql.trim().split('\n').filter(line => line.trim() && !line.trim().startsWith('//'));
+        warnings.push(`This query contains ${statements.length} MongoDB operations that will be executed in sequence.`);
+      }
 
-    const isDangerous = dangerousPatterns.some(pattern => pattern.test(sql));
-    const isMultiStatement = statements.length > 1;
-    
-    const warnings: string[] = [];
-    if (isDangerous) {
-      if (/DROP\s+DATABASE/i.test(sql)) warnings.push("This query will DROP an entire database!");
-      if (/TRUNCATE/i.test(sql)) warnings.push("This query will TRUNCATE a table (delete all rows)!");
-      if (/DELETE\s+FROM\s+\w+\s*(?:;|$)/i.test(sql)) warnings.push("This DELETE query has no WHERE clause!");
-      if (/UPDATE\s+\w+\s+SET\s+.*?(?:;|$)(?!.*WHERE)/i.test(sql)) warnings.push("This UPDATE query has no WHERE clause!");
-    }
-    if (isMultiStatement) {
-      warnings.push(`This query contains ${statements.length} statements that will be executed in sequence.`);
-    }
+      return { isDangerous, isMultiStatement, warnings, statementCount: isMultiStatement ? sql.trim().split('\n').filter(line => line.trim() && !line.trim().startsWith('//')).length : 1 };
+    } else {
+      // SQL query analysis (existing logic)
+      const statements = splitSQLStatements(sql);
+      const dangerousPatterns = [
+        /DROP\s+DATABASE/i,
+        /DROP\s+SCHEMA/i,
+        /TRUNCATE\s+TABLE/i,
+        /DELETE\s+FROM\s+\w+\s*(?:;|$)/i, // DELETE without WHERE
+        /UPDATE\s+\w+\s+SET\s+.*?(?:;|$)(?!.*WHERE)/i, // UPDATE without WHERE
+      ];
 
-    return { isDangerous, isMultiStatement, warnings, statementCount: statements.length };
+      const isDangerous = dangerousPatterns.some(pattern => pattern.test(sql));
+      const isMultiStatement = statements.length > 1;
+      
+      const warnings: string[] = [];
+      if (isDangerous) {
+        if (/DROP\s+DATABASE/i.test(sql)) warnings.push("This query will DROP an entire database!");
+        if (/TRUNCATE/i.test(sql)) warnings.push("This query will TRUNCATE a table (delete all rows)!");
+        if (/DELETE\s+FROM\s+\w+\s*(?:;|$)/i.test(sql)) warnings.push("This DELETE query has no WHERE clause!");
+        if (/UPDATE\s+\w+\s+SET\s+.*?(?:;|$)(?!.*WHERE)/i.test(sql)) warnings.push("This UPDATE query has no WHERE clause!");
+      }
+      if (isMultiStatement) {
+        warnings.push(`This query contains ${statements.length} statements that will be executed in sequence.`);
+      }
+
+      return { isDangerous, isMultiStatement, warnings, statementCount: statements.length };
+    }
   };
 
   const splitSQLStatements = (sql: string): string[] => {
@@ -241,7 +270,7 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
       toast({
         variant: "destructive",
         title: "No query to execute",
-        description: "Please enter a SQL query first.",
+        description: `Please enter a ${isMongoDB ? 'MongoDB query' : 'SQL query'} first.`,
       });
       return;
     }
@@ -458,7 +487,7 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
           value={tab.query}
           initialValue={tab.query}
           onChange={handleEditorChange}
-          language="sql"
+          language={isMongoDB ? "javascript" : "sql"}
           options={{
             fontSize: 14,
             lineNumbers: 'on',
