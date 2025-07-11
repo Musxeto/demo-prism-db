@@ -10,6 +10,8 @@ import ConnectionSelector from './connection-selector';
 import { SchemaBrowserWithTabs } from './schema-browser-tabs';
 import { MultiTabQueryStudio } from './multi-tab-query-studio';
 import ConnectionModal from './connection-modal';
+import ConnectionSettingsModal from './connection-settings-modal';
+import ConnectionDeleteModal from './connection-delete-modal';
 import ERDViewer from './erd-viewer';
 import { 
   Database, 
@@ -30,6 +32,10 @@ export function EnhancedDatabaseStudio() {
   const [selectedConnectionId, setSelectedConnectionId] = useState<number | null>(null);
   const [isConnectionModalOpen, setIsConnectionModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false); // State for history modal
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [connectionToEdit, setConnectionToEdit] = useState<Connection | null>(null);
+  const [connectionToDelete, setConnectionToDelete] = useState<Connection | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('query');
   const [isSchemaCollapsed, setIsSchemaCollapsed] = useState(false);
   
@@ -67,6 +73,30 @@ export function EnhancedDatabaseStudio() {
 
   const toggleSchemaPanel = () => {
     setIsSchemaCollapsed(!isSchemaCollapsed);
+  };
+
+  const handleSettingsClick = (connection: Connection) => {
+    setConnectionToEdit(connection);
+    setIsSettingsModalOpen(true);
+  };
+
+  const handleDeleteClick = (connection: Connection) => {
+    console.log('Delete button clicked for connection:', connection);
+    setConnectionToDelete(connection);
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleConnectionUpdated = () => {
+    refetch();
+  };
+
+  const handleConnectionDeleted = () => {
+    refetch();
+    // If the deleted connection was the active one, reset the selection
+    if (connectionToDelete && connectionToDelete.id === selectedConnectionId) {
+      setSelectedConnectionId(null);
+      closeAllTabs();
+    }
   };
 
   if (connectionsLoading) {
@@ -181,6 +211,9 @@ export function EnhancedDatabaseStudio() {
           connections={connections}
           selectedConnectionId={selectedConnectionId}
           onConnectionChange={handleConnectionChange}
+          activeTabId={activeTabId}
+          onSettingsClick={handleSettingsClick}
+          onDeleteClick={handleDeleteClick}
         />
       </div>
 
@@ -232,12 +265,33 @@ export function EnhancedDatabaseStudio() {
         }}
       />
 
+      {/* Connection Settings Modal */}
+      <ConnectionSettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => {
+          setIsSettingsModalOpen(false);
+          setConnectionToEdit(null);
+        }}
+        connection={connectionToEdit}
+        onConnectionUpdated={handleConnectionUpdated}
+      />
+
+      {/* Connection Delete Modal */}
+      <ConnectionDeleteModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          setIsDeleteModalOpen(false);
+          setConnectionToDelete(null);
+        }}
+        connection={connectionToDelete}
+        onConnectionDeleted={handleConnectionDeleted}
+      />
+
       {/* History Modal */}
       <QueryHistoryModal
         isOpen={isHistoryModalOpen}
         onClose={() => setIsHistoryModalOpen(false)}
         onQuerySelect={handleQuerySelectFromHistory}
-        connectionId={selectedConnectionId}
       />
     </div>
   );
