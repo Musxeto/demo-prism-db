@@ -67,6 +67,46 @@ def delete_connection(db: Session, connection_id: int):
         db.commit()
     return
 
+def test_connection_without_saving(connection: schemas.ConnectionCreate) -> Tuple[bool, str]:
+    """Test database connection without saving to database
+    
+    Args:
+        connection: Connection details to test
+        
+    Returns:
+        Tuple of (success: bool, message: str)
+    """
+    try:
+        # Convert connection data to proper format for connector
+        connection_data = connection.model_dump()
+        
+        # Map databaseType to database_type for the connector
+        db_type = connection_data.pop("databaseType", "mysql")
+        
+        connection_config = {
+            "host": connection_data.get("host"),
+            "port": connection_data.get("port", 3306),
+            "database": connection_data.get("database"),
+            "username": connection_data.get("username"),
+            "password": connection_data.get("password", ""),
+            "database_type": db_type
+        }
+        
+        # Create connector and test connection
+        connector = create_connector(connection_config)
+        success, message = connector.test_connection()
+        
+        # Clean up
+        try:
+            connector.disconnect()
+        except:
+            pass
+            
+        return success, message
+    
+    except Exception as e:
+        return False, f"Connection test failed: {str(e)}"
+
 def get_schema(db: Session, connection_id: int):
     connection = get_connection(db, connection_id)
     if not connection:

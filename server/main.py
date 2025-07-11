@@ -36,6 +36,17 @@ def read_connections(db: Session = Depends(get_db)):
 @app.post("/api/connections", response_model=schemas.Connection)
 def create_connection(connection: schemas.ConnectionCreate, db: Session = Depends(get_db)):
     return storage.create_connection(db=db, connection=connection)
+    
+@app.post("/api/connections/test")
+def test_connection(connection: schemas.ConnectionCreate):
+    try:
+        result = storage.test_connection_without_saving(connection)
+        if result[0]:
+            return {"success": True, "message": "Connection successful"}
+        else:
+            raise HTTPException(status_code=400, detail=result[1])
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.put("/api/connections/{connection_id}", response_model=schemas.Connection)
 def update_connection(connection_id: int, connection: schemas.ConnectionUpdate, db: Session = Depends(get_db)):
