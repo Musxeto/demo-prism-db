@@ -298,38 +298,108 @@ export function ClientPaginatedResultsPanel({
     }
 
     return (
-      <div className="space-y-4">
-        <Alert>
-          <FileText className="h-4 w-4 text-orange-500" />
-          <AlertDescription>
-            {result.message || 'Multi-statement query executed successfully.'}
-          </AlertDescription>
-        </Alert>
+      <div className="flex flex-col h-full">
+        {/* Header Summary */}
+        <div className="flex-shrink-0 mb-4">
+          <Alert>
+            <FileText className="h-4 w-4 text-orange-500" />
+            <AlertDescription className="flex items-center justify-between">
+              <span>{result.message || 'Multi-statement query executed successfully.'}</span>
+              <Badge variant="outline" className="ml-2">
+                {result.results.length} {result.results.length === 1 ? 'statement' : 'statements'}
+              </Badge>
+            </AlertDescription>
+          </Alert>
+        </div>
 
-        <div className="space-y-4">
-          {result.results.map((subResult, index) => (
-            <Card key={index} className="border-l-4 border-l-blue-500">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm">
-                    Statement {index + 1}
-                    {subResult.queryType && (
-                      <Badge variant="outline" className="ml-2">
-                        {subResult.queryType.toUpperCase()}
-                      </Badge>
+        {/* Scrollable Statements Container */}
+        <div className="flex-1 overflow-hidden">
+          <ScrollArea className="h-full pr-4">
+            <div className="space-y-6">
+              {result.results.map((subResult, index) => (
+                <Card key={index} className="border-l-4 border-l-blue-500 shadow-sm">
+                  <CardHeader className="pb-3 bg-gray-50/50">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-base font-semibold flex items-center gap-2">
+                        <div className="w-6 h-6 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold">
+                          {index + 1}
+                        </div>
+                        Statement {index + 1}
+                        {subResult.queryType && (
+                          <Badge variant="outline" className="text-xs">
+                            {subResult.queryType.toUpperCase()}
+                          </Badge>
+                        )}
+                      </CardTitle>
+                      <div className="flex items-center gap-3 text-sm">
+                        <div className="flex items-center gap-1 text-muted-foreground">
+                          <Clock className="h-3 w-3" />
+                          {formatExecutionTime(subResult.executionTimeMs)}
+                        </div>
+                        {subResult.affectedRows !== undefined && (
+                          <div className="flex items-center gap-1 text-green-600 font-medium">
+                            <CheckCircle className="h-3 w-3" />
+                            {subResult.affectedRows} row{subResult.affectedRows !== 1 ? 's' : ''} affected
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardHeader>
+                  
+                  <CardContent className="pt-4">
+                    {/* Render result based on type */}
+                    {subResult.type === 'error' ? (
+                      <Alert variant="destructive">
+                        <AlertTriangle className="h-4 w-4" />
+                        <AlertDescription>
+                          {subResult.message || 'An error occurred while executing this statement.'}
+                        </AlertDescription>
+                      </Alert>
+                    ) : subResult.type === 'select' && subResult.rows && subResult.rows.length > 0 ? (
+                      <div className="max-h-96 overflow-hidden border rounded-lg">
+                        <ClientPaginatedResultsPanel result={subResult} />
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <Alert>
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                          <AlertDescription>
+                            {subResult.message || 'Statement executed successfully.'}
+                          </AlertDescription>
+                        </Alert>
+                        
+                        {/* Show execution details */}
+                        <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg text-sm">
+                          <div>
+                            <span className="font-medium text-gray-600">Execution Time:</span>
+                            <span className="ml-2 font-mono">{formatExecutionTime(subResult.executionTimeMs)}</span>
+                          </div>
+                          {subResult.affectedRows !== undefined && (
+                            <div>
+                              <span className="font-medium text-gray-600">Rows Affected:</span>
+                              <span className="ml-2 font-semibold text-green-600">{subResult.affectedRows}</span>
+                            </div>
+                          )}
+                          {subResult.queryType && (
+                            <div>
+                              <span className="font-medium text-gray-600">Query Type:</span>
+                              <span className="ml-2 font-mono uppercase">{subResult.queryType}</span>
+                            </div>
+                          )}
+                          {subResult.type && (
+                            <div>
+                              <span className="font-medium text-gray-600">Result Type:</span>
+                              <span className="ml-2 font-mono uppercase">{subResult.type}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     )}
-                  </CardTitle>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Clock className="h-3 w-3" />
-                    {formatExecutionTime(subResult.executionTimeMs)}
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <ClientPaginatedResultsPanel result={subResult} />
-              </CardContent>
-            </Card>
-          ))}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </ScrollArea>
         </div>
       </div>
     );
