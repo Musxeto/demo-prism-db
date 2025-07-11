@@ -55,6 +55,15 @@ def update_connection(connection_id: int, connection: schemas.ConnectionUpdate, 
         raise HTTPException(status_code=404, detail="Connection not found")
     return db_connection
 
+@app.delete("/api/connections/{connection_id}")
+def delete_connection(connection_id: int, db: Session = Depends(get_db)):
+    db_connection = storage.get_connection(db=db, connection_id=connection_id)
+    if db_connection is None:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    
+    storage.delete_connection(db=db, connection_id=connection_id)
+    return {"message": "Connection deleted successfully"}
+
 @app.get("/api/connections/{connection_id}/schema", response_model=schemas.DatabaseSchema)
 def get_connection_schema(connection_id: int, db: Session = Depends(get_db)):
     print(f"Fetching schema for connection_id: {connection_id}")
