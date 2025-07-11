@@ -36,7 +36,6 @@ const ConnectionDeleteModal: React.FC<ConnectionDeleteModalProps> = ({
   // Update local connection when the prop changes
   React.useEffect(() => {
     if (connection) {
-      console.log('Connection prop updated:', connection);
       setLocalConnection(connection);
     }
   }, [connection]);
@@ -44,14 +43,11 @@ const ConnectionDeleteModal: React.FC<ConnectionDeleteModalProps> = ({
   const deleteMutation = useMutation({
     mutationFn: async () => {
       const connectionToDelete = localConnection || connection;
-      console.log('Delete mutation called with connection:', connectionToDelete);
       
       if (!connectionToDelete) {
-        console.error('No connection provided to delete modal');
         throw new Error('No connection selected');
       }
       
-      console.log(`Attempting to delete connection ${connectionToDelete.id}: ${connectionToDelete.name}`);
       const response = await fetch(`/api/connections/${connectionToDelete.id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
@@ -59,12 +55,10 @@ const ConnectionDeleteModal: React.FC<ConnectionDeleteModalProps> = ({
 
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('Delete API error:', errorData);
         throw new Error(errorData.detail || 'Failed to delete connection');
       }
       
       const result = await response.json();
-      console.log('Delete API success:', result);
       return result;
     },
     onSuccess: () => {
@@ -90,13 +84,10 @@ const ConnectionDeleteModal: React.FC<ConnectionDeleteModalProps> = ({
   });
 
   const handleDelete = () => {
-    const connectionToDelete = localConnection || connection;
-    console.log('handleDelete called with connection:', connectionToDelete);
     deleteMutation.mutate();
   };
 
   const displayConnection = localConnection || connection;
-  console.log('ConnectionDeleteModal render - isOpen:', isOpen, 'connection:', displayConnection);
 
   if (!displayConnection) return null;
 

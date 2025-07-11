@@ -81,7 +81,6 @@ export function EnhancedDatabaseStudio() {
   };
 
   const handleDeleteClick = (connection: Connection) => {
-    console.log('Delete button clicked for connection:', connection);
     setConnectionToDelete(connection);
     setIsDeleteModalOpen(true);
   };
