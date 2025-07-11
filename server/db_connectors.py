@@ -525,12 +525,13 @@ class MSSQLConnector(DatabaseConnector):
         
         # Try to find an appropriate ODBC driver - we'll try multiple common drivers
         self.odbc_drivers = [
-            "ODBC Driver 18 for SQL Server",  # Latest driver
-            "ODBC Driver 17 for SQL Server",  # Common version
-            "ODBC Driver 13 for SQL Server",  # Older but common
+            "ODBC Driver 18 for SQL Server",  # Latest driver (2022+)
+            "ODBC Driver 17 for SQL Server",  # Common version (2016+)
+            "ODBC Driver 13 for SQL Server",  # Older but common (2014+)
+            "ODBC Driver 11 for SQL Server",  # Legacy support
             "SQL Server Native Client 11.0",  # Older version
             "SQL Server Native Client 10.0",  # Even older
-            "SQL Server"                      # Generic name
+            "SQL Server"                      # Generic fallback
         ]
     
     def connect(self) -> Any:
@@ -547,9 +548,30 @@ class MSSQLConnector(DatabaseConnector):
         if self.connection:
             return self.connection
         
+        # Get available drivers on the system
+        available_drivers = self.get_available_drivers()
+        print(f"Available SQL Server drivers on system: {available_drivers}")
+        
+        # Prioritize drivers that are actually available on the system
+        drivers_to_try = []
+        for driver in self.odbc_drivers:
+            if driver in available_drivers:
+                drivers_to_try.append(driver)
+        
+        # If no preferred drivers are available, try all available ones
+        if not drivers_to_try:
+            drivers_to_try = available_drivers
+        
+        # If still no drivers, fall back to our predefined list
+        if not drivers_to_try:
+            drivers_to_try = self.odbc_drivers
+            print("Warning: No SQL Server drivers detected on system, trying predefined list")
+        
+        print(f"Will attempt connection with drivers: {drivers_to_try}")
+        
         # Try each driver in sequence
         last_error = None
-        for driver in self.odbc_drivers:
+        for driver in drivers_to_try:
             try:
                 # Check if host contains a named instance (contains '\')
                 host = self.config['host']
@@ -579,17 +601,39 @@ class MSSQLConnector(DatabaseConnector):
                 
                 print(f"Attempting connection with driver: {driver}")
                 
-                # Try to connect with this driver
-                self.connection = pyodbc.connect(connection_string, timeout=5)
-                print(f"Connected to SQL Server using driver: {driver}")
-                return self.connection
-            except pyodbc.Error as err:
-                # If driver not found or other error, try next driver
-                last_error = err
+                # Try to connect with this driver with retry logic
+                for attempt in range(2):  # Try twice for each driver
+                    try:
+                        self.connection = pyodbc.connect(connection_string, timeout=10)
+                        print(f"✅ Connected to SQL Server using driver: {driver} (attempt {attempt + 1})")
+                        return self.connection
+                    except pyodbc.Error as err:
+                        if attempt == 0:  # First attempt failed, try once more
+                            print(f"⚠️  First attempt failed with driver '{driver}', retrying...")
+                            import time
+                            time.sleep(1)  # Brief pause before retry
+                            continue
+                        else:
+                            # Both attempts failed, record error and try next driver
+                            last_error = err
+                            print(f"❌ Failed with driver '{driver}' after 2 attempts: {str(err)}")
+                            break
+            except Exception as general_err:
+                # Catch any other unexpected errors
+                last_error = general_err
+                print(f"❌ Unexpected error with driver '{driver}': {str(general_err)}")
                 continue
         
         # If we get here, all drivers failed
-        raise ConnectionError(f"Failed to connect to SQL Server with any available driver. Last error: {last_error}")
+        tried_drivers = ", ".join(drivers_to_try)
+        available_system_drivers = ", ".join(available_drivers) if available_drivers else "None detected"
+        raise ConnectionError(
+            f"Failed to connect to SQL Server with any available driver. "
+            f"Tried drivers: [{tried_drivers}]. "
+            f"Available system drivers: [{available_system_drivers}]. "
+            f"Last error: {last_error}. "
+            f"Please ensure ODBC Driver 17+ for SQL Server is installed."
+        )
     
     def disconnect(self) -> None:
         """Close SQL Server connection"""
@@ -668,32 +712,35 @@ class MSSQLConnector(DatabaseConnector):
     
     def _map_sql_server_type(self, type_code: int) -> str:
         """Map SQL Server type codes to string representation"""
-        # This is a simplification, as pyodbc doesn't expose type names directly
-        # A complete implementation would map all SQL Server type codes
+        # Enhanced mapping for common SQL Server types
         sql_type_mapping = {
-            -150: "SQL_GUID",
-            -9: "SQL_WVARCHAR",
-            -8: "SQL_WCHAR",
-            -7: "SQL_BIT",
-            -6: "SQL_TINYINT",
-            -5: "SQL_BIGINT",
-            -4: "SQL_LONGVARBINARY",
-            -3: "SQL_VARBINARY",
-            -2: "SQL_BINARY",
-            -1: "SQL_LONGVARCHAR",
-            1: "SQL_CHAR",
-            2: "SQL_NUMERIC",
-            3: "SQL_DECIMAL",
-            4: "SQL_INTEGER",
-            5: "SQL_SMALLINT",
-            6: "SQL_FLOAT",
-            7: "SQL_REAL",
-            8: "SQL_DOUBLE",
-            9: "SQL_DATETIME",
-            12: "SQL_VARCHAR",
-            91: "SQL_TYPE_DATE",
-            92: "SQL_TYPE_TIME",
-            93: "SQL_TYPE_TIMESTAMP",
+            -150: "UNIQUEIDENTIFIER",  # SQL_GUID
+            -9: "NVARCHAR",           # SQL_WVARCHAR
+            -8: "NCHAR",              # SQL_WCHAR
+            -7: "BIT",                # SQL_BIT
+            -6: "TINYINT",            # SQL_TINYINT
+            -5: "BIGINT",             # SQL_BIGINT
+            -4: "VARBINARY",          # SQL_LONGVARBINARY (BLOB)
+            -3: "VARBINARY",          # SQL_VARBINARY
+            -2: "BINARY",             # SQL_BINARY
+            -1: "TEXT",               # SQL_LONGVARCHAR (CLOB)
+            1: "CHAR",                # SQL_CHAR
+            2: "NUMERIC",             # SQL_NUMERIC
+            3: "DECIMAL",             # SQL_DECIMAL
+            4: "INT",                 # SQL_INTEGER
+            5: "SMALLINT",            # SQL_SMALLINT
+            6: "FLOAT",               # SQL_FLOAT
+            7: "REAL",                # SQL_REAL
+            8: "DOUBLE",              # SQL_DOUBLE
+            9: "DATETIME",            # SQL_DATETIME
+            12: "VARCHAR",            # SQL_VARCHAR
+            91: "DATE",               # SQL_TYPE_DATE
+            92: "TIME",               # SQL_TYPE_TIME
+            93: "TIMESTAMP",          # SQL_TYPE_TIMESTAMP
+            # Additional SQL Server specific types
+            -11: "DATETIME2",
+            -154: "TIME",
+            -155: "DATETIMEOFFSET",
         }
         
         return sql_type_mapping.get(type_code, f"UNKNOWN({type_code})")
@@ -740,19 +787,18 @@ class MSSQLConnector(DatabaseConnector):
             
             fk_query = """
                 SELECT
-                    FK.TABLE_NAME,
-                    CU.COLUMN_NAME,
-                    PK.TABLE_NAME AS REFERENCED_TABLE_NAME,
-                    PT.COLUMN_NAME AS REFERENCED_COLUMN_NAME
+                    TC.TABLE_NAME,
+                    KCU.COLUMN_NAME,
+                    CCU.TABLE_NAME AS REFERENCED_TABLE_NAME,
+                    CCU.COLUMN_NAME AS REFERENCED_COLUMN_NAME
                 FROM
-                    INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS AS FK
-                    JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS PK
-                        ON FK.UNIQUE_CONSTRAINT_NAME = PK.CONSTRAINT_NAME
-                    JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS CU
-                        ON FK.CONSTRAINT_NAME = CU.CONSTRAINT_NAME
-                    JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS PT
-                        ON PK.CONSTRAINT_NAME = PT.CONSTRAINT_NAME
-                        AND CU.ORDINAL_POSITION = PT.ORDINAL_POSITION
+                    INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS TC
+                    JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS KCU
+                        ON TC.CONSTRAINT_NAME = KCU.CONSTRAINT_NAME
+                    JOIN INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE AS CCU
+                        ON CCU.CONSTRAINT_NAME = TC.CONSTRAINT_NAME
+                WHERE
+                    TC.CONSTRAINT_TYPE = 'FOREIGN KEY'
             """
             cursor.execute(fk_query)
             foreign_keys = {}
@@ -892,22 +938,18 @@ class MSSQLConnector(DatabaseConnector):
             # Get foreign key information
             fk_query = f"""
                 SELECT
-                    CU.COLUMN_NAME,
-                    PK.TABLE_NAME AS REFERENCED_TABLE_NAME,
-                    PT.COLUMN_NAME AS REFERENCED_COLUMN_NAME
+                    KCU.COLUMN_NAME,
+                    CCU.TABLE_NAME AS REFERENCED_TABLE_NAME,
+                    CCU.COLUMN_NAME AS REFERENCED_COLUMN_NAME
                 FROM
-                    INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS AS FK
-                    JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS C
-                        ON C.CONSTRAINT_NAME = FK.CONSTRAINT_NAME
-                    JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS PK
-                        ON FK.UNIQUE_CONSTRAINT_NAME = PK.CONSTRAINT_NAME
-                    JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS CU
-                        ON C.CONSTRAINT_NAME = CU.CONSTRAINT_NAME
-                    JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS PT
-                        ON PK.CONSTRAINT_NAME = PT.CONSTRAINT_NAME
-                        AND CU.ORDINAL_POSITION = PT.ORDINAL_POSITION
+                    INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS TC
+                    JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS KCU
+                        ON TC.CONSTRAINT_NAME = KCU.CONSTRAINT_NAME
+                    JOIN INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE AS CCU
+                        ON CCU.CONSTRAINT_NAME = TC.CONSTRAINT_NAME
                 WHERE
-                    C.TABLE_NAME = '{table_name}'
+                    TC.CONSTRAINT_TYPE = 'FOREIGN KEY'
+                    AND TC.TABLE_NAME = '{table_name}'
             """
             cursor.execute(fk_query)
             foreign_keys = {}
@@ -978,867 +1020,27 @@ class MSSQLConnector(DatabaseConnector):
             
         finally:
             cursor.close()
-
-class PostgreSQLConnector(DatabaseConnector):
-    """PostgreSQL database connector implementation"""
     
-    def __init__(self, config: Dict[str, Any]):
-        """Initialize with connection config
-        
-        Args:
-            config: Dict with host, port, database, username, password
-        """
-        self.config = config
-        self.connection = None
-        self.cursor = None
-    
-    def connect(self) -> Any:
-        """Connect to PostgreSQL database"""
-        if self.connection:
-            # Check if connection is still open
-            try:
-                # A simple check if the connection is still active
-                self.connection.status
-                return self.connection
-            except (psycopg2.InterfaceError, psycopg2.OperationalError):
-                # Connection is closed or broken, create a new one
-                pass
-            
-        try:
-            self.connection = psycopg2.connect(
-                host=self.config["host"],
-                port=self.config["port"],
-                user=self.config["username"],
-                password=self.config["password"],
-                dbname=self.config["database"]
-            )
-            return self.connection
-        except psycopg2.Error as err:
-            raise ConnectionError(f"Failed to connect to PostgreSQL: {err}")
-    
-    def disconnect(self) -> None:
-        """Close PostgreSQL connection"""
-        if self.connection:
-            if self.cursor:
-                self.cursor.close()
-            self.connection.close()
-            self.connection = None
-            self.cursor = None
-    
-    def test_connection(self) -> Tuple[bool, str]:
-        """Test PostgreSQL connection"""
-        try:
-            conn = psycopg2.connect(
-                host=self.config["host"],
-                port=self.config["port"],
-                user=self.config["username"],
-                password=self.config["password"],
-                dbname=self.config["database"],
-                connect_timeout=5  # Short timeout for testing
-            )
-            if conn:
-                conn.close()
-                return True, "Connection successful"
-            return False, "Could not establish connection"
-        except psycopg2.Error as err:
-            return False, f"Connection failed: {str(err)}"
-    
-    def execute_query(self, sql: str) -> Dict[str, Any]:
-        """Execute SQL query on PostgreSQL"""
-        start_time = __import__('time').time()
-        result = {
-            "type": "error",
-            "message": "",
-            "executionTimeMs": 0
-        }
-        
-        try:
-            conn = self.connect()
-            cursor = conn.cursor()
-            
-            # Determine if this is a SELECT query or a different type
-            is_select = sql.strip().upper().startswith("SELECT")
-            
-            cursor.execute(sql)
-            
-            if is_select:
-                rows = cursor.fetchall()
-                columns = cursor.description
-                
-                # PostgreSQL returns column info differently, adjust format to match our standard
-                column_info = [{"name": col[0], "type": self._map_pg_type(col[1])} for col in columns]
-                
-                # Convert rows to list of values
-                formatted_rows = []
-                for row in rows:
-                    formatted_rows.append(list(row))
-                
-                result.update({
-                    "type": "select",
-                    "columns": column_info,
-                    "rows": formatted_rows,
-                    "rowCount": len(rows),
-                })
-            else:
-                conn.commit()
-                result.update({
-                    "type": "write",
-                    "affectedRows": cursor.rowcount,
-                    "message": f"{cursor.rowcount} row(s) affected"
-                })
-                
-            result["executionTimeMs"] = (__import__('time').time() - start_time) * 1000
-            cursor.close()
-            return result
-            
-        except psycopg2.Error as err:
-            result.update({
-                "message": str(err),
-                "executionTimeMs": (__import__('time').time() - start_time) * 1000
-            })
-            return result
-    
-    def _map_pg_type(self, type_code: int) -> str:
-        """Map PostgreSQL type OIDs to type names
-        
-        This is a simple mapping, can be expanded as needed.
-        """
-        # Common PostgreSQL type OIDs
-        types = {
-            16: "boolean",
-            20: "bigint",
-            21: "smallint",
-            23: "integer",
-            25: "text",
-            700: "real",
-            701: "double precision",
-            1042: "char",
-            1043: "varchar",
-            1082: "date",
-            1083: "time",
-            1114: "timestamp",
-            1184: "timestamptz",
-            1700: "numeric",
-        }
-        return types.get(type_code, str(type_code))
-    
-    def get_schema(self) -> Dict[str, Any]:
-        """Get PostgreSQL database schema"""
-        conn = self.connect()
-        cursor = conn.cursor()
-        
-        try:
-            # Get all tables in the public schema
-            cursor.execute("""
-                SELECT tablename 
-                FROM pg_catalog.pg_tables 
-                WHERE schemaname = 'public'
-            """)
-            tables = [table[0] for table in cursor.fetchall()]
-            
-            result = {
-                "database": self.config["database"],
-                "tables": []
-            }
-            
-            for table in tables:
-                # Get table structure
-                cursor.execute(f"""
-                    SELECT 
-                        column_name, 
-                        data_type,
-                        is_nullable,
-                        column_default,
-                        ordinal_position
-                    FROM information_schema.columns
-                    WHERE table_name = '{table}'
-                    ORDER BY ordinal_position
-                """)
-                columns_data = cursor.fetchall()
-                
-                # Get primary key information
-                cursor.execute(f"""
-                    SELECT a.attname
-                    FROM pg_index i
-                    JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-                    WHERE i.indrelid = '{table}'::regclass
-                    AND i.indisprimary
-                """)
-                pk_columns = [pk[0] for pk in cursor.fetchall()]
-                
-                # Get foreign keys
-                cursor.execute(f"""
-                    SELECT
-                        kcu.column_name,
-                        ccu.table_name AS foreign_table_name,
-                        ccu.column_name AS foreign_column_name
-                    FROM
-                        information_schema.table_constraints AS tc
-                        JOIN information_schema.key_column_usage AS kcu
-                          ON tc.constraint_name = kcu.constraint_name
-                          AND tc.table_schema = kcu.table_schema
-                        JOIN information_schema.constraint_column_usage AS ccu
-                          ON ccu.constraint_name = tc.constraint_name
-                          AND ccu.table_schema = tc.table_schema
-                    WHERE tc.constraint_type = 'FOREIGN KEY'
-                    AND tc.table_name = '{table}';
-                """)
-                fk_data = cursor.fetchall()
-                
-                # Create a mapping of column name to foreign key reference
-                fk_mapping = {}
-                for fk in fk_data:
-                    fk_mapping[fk[0]] = {
-                        "table": fk[1],
-                        "column": fk[2]
-                    }
-                
-                # Get sample rows
-                cursor.execute(f"SELECT * FROM \"{table}\" LIMIT 5")
-                sample_rows = cursor.fetchall()
-                
-                # Get row count
-                cursor.execute(f"SELECT COUNT(*) FROM \"{table}\"")
-                row_count = cursor.fetchone()[0]
-                
-                # Convert column data to our standardized format
-                columns = []
-                for col_data in columns_data:
-                    col_name = col_data[0]
-                    columns.append({
-                        "name": col_name,
-                        "type": col_data[1],
-                        "nullable": col_data[2] == "YES",
-                        "isPrimaryKey": col_name in pk_columns,
-                        "isForeignKey": col_name in fk_mapping,
-                        "references": fk_mapping.get(col_name)
-                    })
-                
-                # Sample rows need to be a list of dictionaries for easy display
-                formatted_sample_rows = []
-                for row in sample_rows:
-                    row_dict = {}
-                    for i, col in enumerate(columns):
-                        row_dict[col["name"]] = row[i]
-                    formatted_sample_rows.append(row_dict)
-                
-                table_info = {
-                    "tableName": table,
-                    "rowCount": row_count,
-                    "columns": columns,
-                    "sampleRows": formatted_sample_rows
-                }
-                
-                result["tables"].append(table_info)
-            
-            return result
-            
-        finally:
-            cursor.close()
-    
-    def get_table_info(self, table_name: str) -> Dict[str, Any]:
-        """Get detailed information about a specific PostgreSQL table"""
-        conn = self.connect()
-        cursor = conn.cursor()
-        
-        try:
-            # Get table structure
-            cursor.execute(f"""
-                SELECT 
-                    column_name, 
-                    data_type,
-                    is_nullable,
-                    column_default,
-                    ordinal_position
-                FROM information_schema.columns
-                WHERE table_name = '{table_name}'
-                ORDER BY ordinal_position
-            """)
-            columns_data = cursor.fetchall()
-            
-            # Get primary key information
-            cursor.execute(f"""
-                SELECT a.attname
-                FROM pg_index i
-                JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-                WHERE i.indrelid = '{table_name}'::regclass
-                AND i.indisprimary
-            """)
-            pk_columns = [pk[0] for pk in cursor.fetchall()]
-            
-            # Get foreign keys
-            cursor.execute(f"""
-                SELECT
-                    kcu.column_name,
-                    ccu.table_name AS foreign_table_name,
-                    ccu.column_name AS foreign_column_name
-                FROM
-                    information_schema.table_constraints AS tc
-                    JOIN information_schema.key_column_usage AS kcu
-                      ON tc.constraint_name = kcu.constraint_name
-                      AND tc.table_schema = kcu.table_schema
-                    JOIN information_schema.constraint_column_usage AS ccu
-                      ON ccu.constraint_name = tc.constraint_name
-                      AND ccu.table_schema = tc.table_schema
-                WHERE tc.constraint_type = 'FOREIGN KEY'
-                AND tc.table_name = '{table_name}';
-            """)
-            fk_data = cursor.fetchall()
-            
-            # Create a mapping of column name to foreign key reference
-            fk_mapping = {}
-            for fk in fk_data:
-                fk_mapping[fk[0]] = {
-                    "table": fk[1],
-                    "column": fk[2]
-                }
-            
-            # Get sample rows
-            cursor.execute(f"SELECT * FROM \"{table_name}\" LIMIT 5")
-            sample_rows = cursor.fetchall()
-            
-            # Get row count
-            cursor.execute(f"SELECT COUNT(*) FROM \"{table_name}\"")
-            row_count = cursor.fetchone()[0]
-            
-            # Convert column data to our standardized format
-            columns = []
-            for col_data in columns_data:
-                col_name = col_data[0]
-                columns.append({
-                    "name": col_name,
-                    "type": col_data[1],
-                    "nullable": col_data[2] == "YES",
-                    "isPrimaryKey": col_name in pk_columns,
-                    "isForeignKey": col_name in fk_mapping,
-                    "references": fk_mapping.get(col_name)
-                })
-            
-            # Sample rows need to be a list of dictionaries for easy display
-            formatted_sample_rows = []
-            for row in sample_rows:
-                row_dict = {}
-                for i, col in enumerate(columns):
-                    row_dict[col["name"]] = row[i]
-                formatted_sample_rows.append(row_dict)
-            
-            return {
-                "tableName": table_name,
-                "rowCount": row_count,
-                "columns": columns,
-                "sampleRows": formatted_sample_rows
-            }
-            
-        finally:
-            cursor.close()
-
-class MongoDBConnector(DatabaseConnector):
-    """MongoDB database connector implementation"""
-    
-    def __init__(self, config: Dict[str, Any]):
-        """Initialize with connection config
-        
-        Args:
-            config: Dict with host, port, database, username, password
-        """
-        self.config = config
-        self.client = None
-        self.db = None
-    
-    def connect(self) -> Any:
-        """Connect to MongoDB database"""
-        if self.db is not None:
-            # Test if connection is still alive
-            try:
-                self.client.admin.command('ping')
-                return self.db
-            except:
-                # Connection is stale, reconnect
-                self.disconnect()
-            
-        # Try different authentication configurations
-        auth_sources_to_try = []
-        
-        if self.config.get("username") and self.config.get("password"):
-            # If authSource is specified, use it
-            if self.config.get("authSource"):
-                auth_sources_to_try.append(self.config["authSource"])
-            else:
-                # Try the database name first (common pattern), then admin
-                auth_sources_to_try.extend([self.config["database"], "admin"])
-        
-        # Base connection parameters
-        connection_params = {
-            "host": self.config["host"],
-            "port": int(self.config["port"]),
-            "serverSelectionTimeoutMS": 5000,
-            "connectTimeoutMS": 10000,
-            "socketTimeoutMS": 10000,
-        }
-        
-        last_error = None
-        
-        # Try without authentication first if no credentials provided
-        if not (self.config.get("username") and self.config.get("password")):
-            try:
-                self.client = pymongo.MongoClient(**connection_params)
-                self.client.admin.command('ping')
-                self.db = self.client[self.config["database"]]
-                return self.db
-            except Exception as err:
-                last_error = err
-        else:
-            # Try each auth source
-            for auth_source in auth_sources_to_try:
-                try:
-                    auth_params = connection_params.copy()
-                    auth_params.update({
-                        "username": self.config["username"],
-                        "password": self.config["password"],
-                        "authSource": auth_source
-                    })
-                    
-                    self.client = pymongo.MongoClient(**auth_params)
-                    # Test the connection
-                    self.client.admin.command('ping')
-                    # Access the specific database
-                    self.db = self.client[self.config["database"]]
-                    return self.db
-                    
-                except pymongo.errors.AuthenticationFailed as err:
-                    last_error = err
-                    continue  # Try next auth source
-                except Exception as err:
-                    last_error = err
-                    break  # Other errors are not auth-related, don't retry
-        
-        # If we get here, all attempts failed
-        if isinstance(last_error, pymongo.errors.AuthenticationFailed):
-            raise ConnectionError(f"Authentication failed. Tried auth sources: {auth_sources_to_try}. Error: {last_error}")
-        elif isinstance(last_error, pymongo.errors.ServerSelectionTimeoutError):
-            raise ConnectionError(f"Cannot connect to MongoDB server: {last_error}")
-        else:
-            raise ConnectionError(f"Failed to connect to MongoDB: {last_error}")
-    
-    def disconnect(self) -> None:
-        """Close MongoDB connection"""
-        if self.client:
-            self.client.close()
-            self.client = None
-            self.db = None
-    
-    def test_connection(self) -> Tuple[bool, str]:
-        """Test MongoDB connection"""
-        # Try different authentication configurations
-        auth_sources_to_try = []
-        
-        if self.config.get("username") and self.config.get("password"):
-            # If authSource is specified, use it
-            if self.config.get("authSource"):
-                auth_sources_to_try.append(self.config["authSource"])
-            else:
-                # Try the database name first (common pattern), then admin
-                auth_sources_to_try.extend([self.config["database"], "admin"])
-        
-        # Base connection parameters
-        connection_params = {
-            "host": self.config["host"],
-            "port": int(self.config["port"]),
-            "serverSelectionTimeoutMS": 5000,
-            "connectTimeoutMS": 10000,
-            "socketTimeoutMS": 10000,
-        }
-        
-        last_error = None
-        
-        # Try without authentication first if no credentials provided
-        if not (self.config.get("username") and self.config.get("password")):
-            try:
-                client = pymongo.MongoClient(**connection_params)
-                client.admin.command('ping')
-                db = client[self.config["database"]]
-                collections = db.list_collection_names()
-                client.close()
-                return True, f"Connection successful (no auth). Found {len(collections)} collections."
-            except Exception as err:
-                return False, f"Connection failed: {str(err)}"
-        else:
-            # Try each auth source
-            for auth_source in auth_sources_to_try:
-                try:
-                    auth_params = connection_params.copy()
-                    auth_params.update({
-                        "username": self.config["username"],
-                        "password": self.config["password"],
-                        "authSource": auth_source
-                    })
-                    
-                    client = pymongo.MongoClient(**auth_params)
-                    client.admin.command('ping')
-                    db = client[self.config["database"]]
-                    collections = db.list_collection_names()
-                    client.close()
-                    return True, f"Connection successful (auth source: {auth_source}). Found {len(collections)} collections."
-                    
-                except pymongo.errors.AuthenticationFailed as err:
-                    last_error = f"Authentication failed with auth source '{auth_source}': {str(err)}"
-                    continue  # Try next auth source
-                except pymongo.errors.ServerSelectionTimeoutError as err:
-                    return False, f"Cannot connect to MongoDB server: {str(err)}"
-                except Exception as err:
-                    return False, f"Connection error: {str(err)}"
-        
-        # If we get here, all auth attempts failed
-        return False, f"Authentication failed. Tried auth sources: {auth_sources_to_try}. Last error: {last_error}"
-            
-    def _parse_mongo_query(self, query_string: str) -> Tuple[str, str, Any, Dict, int]:
-        """Parse MongoDB query string into collection name, query, and options
-        
-        Example queries:
-        - db.users.find({})
-        - db.orders.find({"status": "shipped"})
-        - db.products.aggregate([{"$match": {"price": {"$gt": 100}}}])
-        - db.books.find({}).limit(5)
+    def get_available_drivers(self) -> List[str]:
+        """Get list of available ODBC drivers for SQL Server on the system
         
         Returns:
-            tuple: (operation, collection_name, query_object, options, limit)
+            List of available SQL Server ODBC driver names
         """
-        if not query_string:
-            raise ValueError("Empty query")
-            
-        query_string = query_string.strip()
-        
         try:
-            # First, handle method chaining like .limit(), .sort(), etc.
-            limit = 100  # Default limit
+            if pyodbc is None:
+                return []
             
-            # Extract limit if present
-            limit_match = re.search(r'\.limit\((\d+)\)', query_string)
-            if limit_match:
-                limit = int(limit_match.group(1))
-                # Remove the limit part from the query
-                query_string = re.sub(r'\.limit\(\d+\)', '', query_string)
+            available_drivers = []
+            for driver in pyodbc.drivers():
+                # Check if it's a SQL Server driver
+                if 'sql server' in driver.lower():
+                    available_drivers.append(driver)
             
-            # Parse the main operation
-            match = re.match(r'db\.([a-zA-Z0-9_]+)\.([a-zA-Z]+)\((.*)\)', query_string)
-            if not match:
-                raise ValueError("Invalid MongoDB query format. Expected: db.collection.operation({query})")
-                
-            collection_name = match.group(1)
-            operation = match.group(2)
-            query_params = match.group(3).strip()
-
-            if not query_params:
-                query_params = '{}'
-                
-            # Handle different parameter formats
-            if query_params.startswith('[') and query_params.endswith(']'):
-                # Array parameter (for aggregate)
-                params_obj = json.loads(query_params)
-            elif query_params.startswith('{') and query_params.endswith('}'):
-                # Object parameter (for find, insertOne, etc.)
-                params_obj = json.loads(query_params)
-            else:
-                # Try to parse as JSON
-                params_obj = json.loads(query_params)
-            
-            options = {}
-            
-            # Security check for dangerous operations
-            if operation.lower() in ["drop", "dropdatabase", "deletemany"]:
-                raise ValueError(f"Operation '{operation}' is not allowed for security reasons")
-                
-            return operation, collection_name, params_obj, options, limit
-            
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in query: {str(e)}")
+            return available_drivers
         except Exception as e:
-            raise ValueError(f"Failed to parse MongoDB query: {str(e)}")
-    
-    def execute_query(self, query: str) -> Dict[str, Any]:
-        """Execute MongoDB query"""
-        start_time = __import__('time').time()
-        result = {
-            "type": "error",
-            "message": "",
-            "executionTimeMs": 0
-        }
-        
-        try:
-            db = self.connect()   
-            operation, collection_name, query_obj, options, limit = self._parse_mongo_query(query)  
-            if operation.lower() == "find":
-                collection = db[collection_name]
-                cursor = collection.find(query_obj).limit(limit)
-                documents = list(cursor)
-                if documents:
-                    all_keys = set()
-                    for doc in documents:
-                        self._extract_keys(doc, all_keys)
-
-                    columns = sorted(list(all_keys))
-
-                    rows = []
-                    for doc in documents:
-                        row = []
-                        for key in columns:
-                            value = self._get_nested_value(doc, key)
-                            if ObjectId and isinstance(value, ObjectId):
-                                value = str(value)
-                            elif str(type(value)).find('ObjectId') != -1:
-                                value = str(value)
-                                
-                            row.append(value)
-                        rows.append(row)
-                        
-                    result.update({
-                        "type": "select",
-                        "columns": [{"name": col, "type": "string"} for col in columns],
-                        "rows": rows,
-                        "rowCount": len(documents),
-                    })
-                else:
-                    result.update({
-                        "type": "select",
-                        "columns": [],
-                        "rows": [],
-                        "rowCount": 0,
-                    })
-                
-            elif operation.lower() == "aggregate":
-                collection = db[collection_name]
-                documents = list(collection.aggregate(query_obj))
-                if documents:
-                    all_keys = set()
-                    for doc in documents:
-                        self._extract_keys(doc, all_keys)
-                        
-                    columns = sorted(list(all_keys))
-                    rows = []
-                    
-                    for doc in documents:
-                        row = []
-                        for key in columns:
-                            value = self._get_nested_value(doc, key)
-                            if ObjectId and isinstance(value, ObjectId):
-                                value = str(value)
-                            elif str(type(value)).find('ObjectId') != -1:
-                                value = str(value)
-                                
-                            row.append(value)
-                        rows.append(row)
-                        
-                    result.update({
-                        "type": "select",
-                        "columns": [{"name": col, "type": "string"} for col in columns],
-                        "rows": rows,
-                        "rowCount": len(documents),
-                    })
-                else:
-                    # No documents found
-                    result.update({
-                        "type": "select",
-                        "columns": [],
-                        "rows": [],
-                        "rowCount": 0,
-                    })
-                
-            elif operation.lower() == "insertone":
-                # Get the collection
-                collection = db[collection_name]
-                
-                # Execute insertOne operation
-                insert_result = collection.insert_one(query_obj)
-                
-                result.update({
-                    "type": "write",
-                    "affectedRows": 1,
-                    "message": f"Inserted document with ID: {insert_result.inserted_id}"
-                })
-                
-            elif operation.lower() == "updateone":
-                # For updateOne, we expect two parameters: filter and update
-                if not isinstance(query_obj, dict) or len(query_obj) != 2:
-                    raise ValueError("updateOne requires two objects: filter and update")
-                
-                # Get filter and update objects
-                filter_obj = list(query_obj.values())[0]
-                update_obj = list(query_obj.values())[1]
-                
-                # Get the collection
-                collection = db[collection_name]
-                
-                # Execute updateOne operation
-                update_result = collection.update_one(filter_obj, update_obj)
-                
-                result.update({
-                    "type": "write",
-                    "affectedRows": update_result.modified_count,
-                    "message": f"{update_result.modified_count} document(s) updated"
-                })
-                
-            elif operation.lower() == "deleteone":
-                # Get the collection
-                collection = db[collection_name]
-                
-                # Execute deleteOne operation
-                delete_result = collection.delete_one(query_obj)
-                
-                result.update({
-                    "type": "write",
-                    "affectedRows": delete_result.deleted_count,
-                    "message": f"{delete_result.deleted_count} document(s) deleted"
-                })
-                
-            else:
-                raise ValueError(f"Unsupported MongoDB operation: {operation}")
-                
-        except Exception as e:
-            result.update({
-                "message": str(e),
-            })
-            
-        # Add execution time
-        result["executionTimeMs"] = (__import__('time').time() - start_time) * 1000
-        return result
-    
-    def _extract_keys(self, document: Dict, keys: set, prefix: str = "") -> None:
-        """Extract all keys from a nested document, including flattened paths for nested objects"""
-        for key, value in document.items():
-            # Skip internal MongoDB keys like _id
-            if key == "_id":
-                # Add _id as a regular key, but don't descend into it
-                keys.add(prefix + key if prefix else key)
-                continue
-                
-            # Add the current key
-            flat_key = prefix + key if prefix else key
-            keys.add(flat_key)
-            
-            # If the value is a nested document, recurse
-            if isinstance(value, dict):
-                self._extract_keys(value, keys, flat_key + ".")
-    
-    def _get_nested_value(self, document: Dict, flat_key: str):
-        """Get value from a document using a flattened key path (e.g., 'address.city')"""
-        if "." not in flat_key:
-            # Direct key
-            return document.get(flat_key)
-        
-        # Split the key path
-        parts = flat_key.split(".", 1)
-        key, rest = parts
-        
-        # Get the nested document
-        nested_doc = document.get(key)
-        
-        # If nested document exists and is a dictionary, recurse
-        if nested_doc and isinstance(nested_doc, dict):
-            return self._get_nested_value(nested_doc, rest)
-        
-        # Otherwise, return None
-        return None
-    
-    def get_schema(self) -> Dict[str, Any]:
-        """Get MongoDB database schema (collections and their structure)"""
-        db = self.connect()
-        
-        try:
-            # Get list of all collections
-            collection_names = db.list_collection_names()
-            
-            result = {
-                "database": self.config["database"],
-                "tables": []  # Collections will be treated as tables
-            }
-            
-            for collection_name in collection_names:
-                # Get info about this collection
-                collection_info = self.get_table_info(collection_name)
-                result["tables"].append(collection_info)
-            
-            return result
-            
-        except Exception as e:
-            return {
-                "database": self.config["database"],
-                "error": str(e),                "tables": []
-            }
-    
-    def _convert_objectids_to_strings(self, data):
-        """Recursively convert ObjectId instances to strings for JSON serialization"""
-        if isinstance(data, list):
-            return [self._convert_objectids_to_strings(item) for item in data]
-        elif isinstance(data, dict):
-            return {key: self._convert_objectids_to_strings(value) for key, value in data.items()}
-        elif ObjectId and isinstance(data, ObjectId):
-            return str(data)
-        elif str(type(data)).find('ObjectId') != -1:
-            return str(data)
-        else:
-            return data
-
-    def get_table_info(self, table_name: str) -> Dict[str, Any]:
-        """Get detailed information about a specific collection"""
-        db = self.connect()
-        
-        try:
-            # Access the collection
-            collection = db[table_name]
-            
-            # Get sample documents to infer schema
-            sample_documents = list(collection.find().limit(5))
-            
-            # Convert ObjectIds to strings in sample documents for JSON serialization
-            serializable_sample_documents = self._convert_objectids_to_strings(sample_documents)
-            
-            # Count total documents
-            document_count = collection.count_documents({})
-            
-            # Infer schema from sample documents
-            all_fields = set()
-            for doc in sample_documents:
-                self._extract_keys(doc, all_fields)
-            
-            # Convert to column definitions
-            columns = []
-            for field in sorted(all_fields):
-                # For MongoDB, we don't have strong typing information
-                columns.append({
-                    "name": field,
-                    "type": "DYNAMIC",  # MongoDB has dynamic types
-                    "nullable": True,  # Fields in MongoDB are nullable by default
-                    "isPrimaryKey": field == "_id",  # _id is the only guaranteed primary key
-                    "isForeignKey": False,  # No foreign key concept in MongoDB
-                    "references": None
-                })
-            
-            # Get indexes (optional)
-            indexes = []
-            for index in collection.list_indexes():
-                index_info = {
-                    "name": index["name"],
-                    "fields": list(index["key"].keys()),
-                    "unique": index.get("unique", False)
-                }
-                indexes.append(index_info)
-            
-            return {
-                "tableName": table_name,
-                "rowCount": document_count,
-                "columns": columns,
-                "indexes": indexes,
-                "sampleRows": serializable_sample_documents,
-                "isMongoDB": True  # Flag to indicate this is a MongoDB collection
-            }
-        except Exception as e:
-            return {
-                "tableName": table_name,
-                "error": str(e),
-                "columns": [],
-                "rowCount": 0,
-                "isMongoDB": True
-            }
+            print(f"Warning: Could not enumerate ODBC drivers: {e}")
+            return []
 
 def create_connector(config: Dict[str, Any]) -> DatabaseConnector:
     """Factory function to create the appropriate database connector

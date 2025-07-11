@@ -152,7 +152,8 @@ export default function ConnectionModal({
                   ...prev, 
                   databaseType: value, 
                   port: value === 'postgres' ? 5432 : 
-                        value === 'mongodb' ? 27017 : 3306 
+                        value === 'mongodb' ? 27017 : 
+                        value === 'mssql' ? 1433 : 3306 
                 }))}
               >
                 <SelectTrigger id="databaseType">
@@ -161,9 +162,15 @@ export default function ConnectionModal({
                 <SelectContent>
                   <SelectItem value="mysql">MySQL</SelectItem>
                   <SelectItem value="postgres">PostgreSQL</SelectItem>
+                  <SelectItem value="mssql">Microsoft SQL Server</SelectItem>
                   <SelectItem value="mongodb">MongoDB</SelectItem>
                 </SelectContent>
               </Select>
+              {formData.databaseType === 'mssql' && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  📝 Requires ODBC Driver 17+ for SQL Server to be installed on your system
+                </p>
+              )}
             </div>
           </div>
           
