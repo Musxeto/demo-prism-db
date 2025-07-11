@@ -785,26 +785,25 @@ class MSSQLConnector(DatabaseConnector):
                     primary_keys[table_name] = []
                 primary_keys[table_name].append(column_name)
             
-            fk_query = """
-                SELECT
-                    TC.TABLE_NAME,
-                    KCU.COLUMN_NAME,
-                    CCU.TABLE_NAME AS REFERENCED_TABLE_NAME,
-                    CCU.COLUMN_NAME AS REFERENCED_COLUMN_NAME
-                FROM
-                    INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS TC
-                    JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS KCU
-                        ON TC.CONSTRAINT_NAME = KCU.CONSTRAINT_NAME
-                    JOIN INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE AS CCU
-                        ON CCU.CONSTRAINT_NAME = TC.CONSTRAINT_NAME
-                WHERE
-                    TC.CONSTRAINT_TYPE = 'FOREIGN KEY'
-            """
-            cursor.execute(fk_query)
-            foreign_keys = {}
-            for table_name, column_name, ref_table, ref_column in cursor.fetchall():
-                key = (table_name, column_name)
-                foreign_keys[key] = (ref_table, ref_column)
+            # Get foreign key relationships using simpler approach
+            try:
+                fk_query = """
+                    SELECT 
+                        OBJECT_NAME(parent_object_id) as parent_table,
+                        COL_NAME(parent_object_id, parent_column_id) as parent_column,
+                        OBJECT_NAME(referenced_object_id) as ref_table,
+                        COL_NAME(referenced_object_id, referenced_column_id) as ref_column
+                    FROM sys.foreign_key_columns
+                """
+                cursor.execute(fk_query)
+                foreign_keys = {}
+                for table_name, column_name, ref_table, ref_column in cursor.fetchall():
+                    if table_name and column_name and ref_table and ref_column:  # Ensure no NULLs
+                        key = (table_name, column_name)
+                        foreign_keys[key] = (ref_table, ref_column)
+            except Exception as e:
+                print(f"Warning: Could not get foreign keys: {e}")
+                foreign_keys = {}
             
             for table in tables:
                 # Get column information
@@ -935,26 +934,24 @@ class MSSQLConnector(DatabaseConnector):
             cursor.execute(pk_query)
             primary_keys = [row[0] for row in cursor.fetchall()]
             
-            # Get foreign key information
-            fk_query = f"""
-                SELECT
-                    KCU.COLUMN_NAME,
-                    CCU.TABLE_NAME AS REFERENCED_TABLE_NAME,
-                    CCU.COLUMN_NAME AS REFERENCED_COLUMN_NAME
-                FROM
-                    INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS TC
-                    JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS KCU
-                        ON TC.CONSTRAINT_NAME = KCU.CONSTRAINT_NAME
-                    JOIN INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE AS CCU
-                        ON CCU.CONSTRAINT_NAME = TC.CONSTRAINT_NAME
-                WHERE
-                    TC.CONSTRAINT_TYPE = 'FOREIGN KEY'
-                    AND TC.TABLE_NAME = '{table_name}'
-            """
-            cursor.execute(fk_query)
-            foreign_keys = {}
-            for column_name, ref_table, ref_column in cursor.fetchall():
-                foreign_keys[column_name] = (ref_table, ref_column)
+            # Get foreign key information using simpler approach
+            try:
+                fk_query = f"""
+                    SELECT 
+                        COL_NAME(parent_object_id, parent_column_id) as parent_column,
+                        OBJECT_NAME(referenced_object_id) as ref_table,
+                        COL_NAME(referenced_object_id, referenced_column_id) as ref_column
+                    FROM sys.foreign_key_columns
+                    WHERE OBJECT_NAME(parent_object_id) = '{table_name}'
+                """
+                cursor.execute(fk_query)
+                foreign_keys = {}
+                for column_name, ref_table, ref_column in cursor.fetchall():
+                    if column_name and ref_table and ref_column:  # Ensure no NULLs
+                        foreign_keys[column_name] = (ref_table, ref_column)
+            except Exception as e:
+                print(f"Warning: Could not get foreign keys for {table_name}: {e}")
+                foreign_keys = {}
             
             # Get sample rows
             try:
