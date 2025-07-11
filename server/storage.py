@@ -1,6 +1,8 @@
 from sqlalchemy.orm import Session
+from typing import Tuple
 import models, schemas
 import mysql.connector
+from db_connectors import create_connector
 
 def get_connections(db: Session):
     return db.query(models.Connection).all()

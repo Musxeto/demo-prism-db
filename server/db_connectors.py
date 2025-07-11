@@ -16,9 +16,22 @@ import re
 from typing import Dict, Any, List, Optional, Union, Tuple
 
 # For PostgreSQL and MSSQL support
-import psycopg2  # PostgreSQL
-import pyodbc  # MSSQL via ODBC
-# import pymongo  # MongoDB
+try:
+    import psycopg2  # PostgreSQL
+except ImportError:
+    psycopg2 = None
+
+try:
+    import pyodbc  # MSSQL via ODBC
+except ImportError:
+    pyodbc = None
+
+try:
+    import pymongo  # MongoDB
+    from bson import ObjectId
+except ImportError:
+    pymongo = None
+    ObjectId = None
 
 class DatabaseConnector(ABC):
     """Abstract base class for all database connectors"""
@@ -520,7 +533,7 @@ class MSSQLConnector(DatabaseConnector):
             "SQL Server"                      # Generic name
         ]
     
-    def connect(self) -> pyodbc.Connection:
+    def connect(self) -> Any:
         """Connect to MS SQL Server database using available ODBC drivers
         
         Tries each driver in sequence until a connection is established
@@ -979,7 +992,7 @@ class PostgreSQLConnector(DatabaseConnector):
         self.connection = None
         self.cursor = None
     
-    def connect(self) -> psycopg2.extensions.connection:
+    def connect(self) -> Any:
         """Connect to PostgreSQL database"""
         if self.connection:
             # Check if connection is still open
@@ -1190,12 +1203,12 @@ class PostgreSQLConnector(DatabaseConnector):
                 
                 # Convert column data to our standardized format
                 columns = []
-                for col in columns_data:
-                    col_name = col[0]
+                for col_data in columns_data:
+                    col_name = col_data[0]
                     columns.append({
                         "name": col_name,
-                        "type": col[1],
-                        "nullable": col[2] == "YES",
+                        "type": col_data[1],
+                        "nullable": col_data[2] == "YES",
                         "isPrimaryKey": col_name in pk_columns,
                         "isForeignKey": col_name in fk_mapping,
                         "references": fk_mapping.get(col_name)
@@ -1290,12 +1303,12 @@ class PostgreSQLConnector(DatabaseConnector):
             
             # Convert column data to our standardized format
             columns = []
-            for col in columns_data:
-                col_name = col[0]
+            for col_data in columns_data:
+                col_name = col_data[0]
                 columns.append({
                     "name": col_name,
-                    "type": col[1],
-                    "nullable": col[2] == "YES",
+                    "type": col_data[1],
+                    "nullable": col_data[2] == "YES",
                     "isPrimaryKey": col_name in pk_columns,
                     "isForeignKey": col_name in fk_mapping,
                     "references": fk_mapping.get(col_name)
@@ -1319,71 +1332,543 @@ class PostgreSQLConnector(DatabaseConnector):
         finally:
             cursor.close()
 
-# Factory to create the appropriate connector based on database type
+class MongoDBConnector(DatabaseConnector):
+    """MongoDB database connector implementation"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        """Initialize with connection config
+        
+        Args:
+            config: Dict with host, port, database, username, password
+        """
+        self.config = config
+        self.client = None
+        self.db = None
+    
+    def connect(self) -> Any:
+        """Connect to MongoDB database"""
+        if self.db is not None:
+            # Test if connection is still alive
+            try:
+                self.client.admin.command('ping')
+                return self.db
+            except:
+                # Connection is stale, reconnect
+                self.disconnect()
+            
+        # Try different authentication configurations
+        auth_sources_to_try = []
+        
+        if self.config.get("username") and self.config.get("password"):
+            # If authSource is specified, use it
+            if self.config.get("authSource"):
+                auth_sources_to_try.append(self.config["authSource"])
+            else:
+                # Try the database name first (common pattern), then admin
+                auth_sources_to_try.extend([self.config["database"], "admin"])
+        
+        # Base connection parameters
+        connection_params = {
+            "host": self.config["host"],
+            "port": int(self.config["port"]),
+            "serverSelectionTimeoutMS": 5000,
+            "connectTimeoutMS": 10000,
+            "socketTimeoutMS": 10000,
+        }
+        
+        last_error = None
+        
+        # Try without authentication first if no credentials provided
+        if not (self.config.get("username") and self.config.get("password")):
+            try:
+                self.client = pymongo.MongoClient(**connection_params)
+                self.client.admin.command('ping')
+                self.db = self.client[self.config["database"]]
+                return self.db
+            except Exception as err:
+                last_error = err
+        else:
+            # Try each auth source
+            for auth_source in auth_sources_to_try:
+                try:
+                    auth_params = connection_params.copy()
+                    auth_params.update({
+                        "username": self.config["username"],
+                        "password": self.config["password"],
+                        "authSource": auth_source
+                    })
+                    
+                    self.client = pymongo.MongoClient(**auth_params)
+                    # Test the connection
+                    self.client.admin.command('ping')
+                    # Access the specific database
+                    self.db = self.client[self.config["database"]]
+                    return self.db
+                    
+                except pymongo.errors.AuthenticationFailed as err:
+                    last_error = err
+                    continue  # Try next auth source
+                except Exception as err:
+                    last_error = err
+                    break  # Other errors are not auth-related, don't retry
+        
+        # If we get here, all attempts failed
+        if isinstance(last_error, pymongo.errors.AuthenticationFailed):
+            raise ConnectionError(f"Authentication failed. Tried auth sources: {auth_sources_to_try}. Error: {last_error}")
+        elif isinstance(last_error, pymongo.errors.ServerSelectionTimeoutError):
+            raise ConnectionError(f"Cannot connect to MongoDB server: {last_error}")
+        else:
+            raise ConnectionError(f"Failed to connect to MongoDB: {last_error}")
+    
+    def disconnect(self) -> None:
+        """Close MongoDB connection"""
+        if self.client:
+            self.client.close()
+            self.client = None
+            self.db = None
+    
+    def test_connection(self) -> Tuple[bool, str]:
+        """Test MongoDB connection"""
+        # Try different authentication configurations
+        auth_sources_to_try = []
+        
+        if self.config.get("username") and self.config.get("password"):
+            # If authSource is specified, use it
+            if self.config.get("authSource"):
+                auth_sources_to_try.append(self.config["authSource"])
+            else:
+                # Try the database name first (common pattern), then admin
+                auth_sources_to_try.extend([self.config["database"], "admin"])
+        
+        # Base connection parameters
+        connection_params = {
+            "host": self.config["host"],
+            "port": int(self.config["port"]),
+            "serverSelectionTimeoutMS": 5000,
+            "connectTimeoutMS": 10000,
+            "socketTimeoutMS": 10000,
+        }
+        
+        last_error = None
+        
+        # Try without authentication first if no credentials provided
+        if not (self.config.get("username") and self.config.get("password")):
+            try:
+                client = pymongo.MongoClient(**connection_params)
+                client.admin.command('ping')
+                db = client[self.config["database"]]
+                collections = db.list_collection_names()
+                client.close()
+                return True, f"Connection successful (no auth). Found {len(collections)} collections."
+            except Exception as err:
+                return False, f"Connection failed: {str(err)}"
+        else:
+            # Try each auth source
+            for auth_source in auth_sources_to_try:
+                try:
+                    auth_params = connection_params.copy()
+                    auth_params.update({
+                        "username": self.config["username"],
+                        "password": self.config["password"],
+                        "authSource": auth_source
+                    })
+                    
+                    client = pymongo.MongoClient(**auth_params)
+                    client.admin.command('ping')
+                    db = client[self.config["database"]]
+                    collections = db.list_collection_names()
+                    client.close()
+                    return True, f"Connection successful (auth source: {auth_source}). Found {len(collections)} collections."
+                    
+                except pymongo.errors.AuthenticationFailed as err:
+                    last_error = f"Authentication failed with auth source '{auth_source}': {str(err)}"
+                    continue  # Try next auth source
+                except pymongo.errors.ServerSelectionTimeoutError as err:
+                    return False, f"Cannot connect to MongoDB server: {str(err)}"
+                except Exception as err:
+                    return False, f"Connection error: {str(err)}"
+        
+        # If we get here, all auth attempts failed
+        return False, f"Authentication failed. Tried auth sources: {auth_sources_to_try}. Last error: {last_error}"
+            
+    def _parse_mongo_query(self, query_string: str) -> Tuple[str, str, Any, Dict, int]:
+        """Parse MongoDB query string into collection name, query, and options
+        
+        Example queries:
+        - db.users.find({})
+        - db.orders.find({"status": "shipped"})
+        - db.products.aggregate([{"$match": {"price": {"$gt": 100}}}])
+        - db.books.find({}).limit(5)
+        
+        Returns:
+            tuple: (operation, collection_name, query_object, options, limit)
+        """
+        if not query_string:
+            raise ValueError("Empty query")
+            
+        query_string = query_string.strip()
+        
+        try:
+            # First, handle method chaining like .limit(), .sort(), etc.
+            limit = 100  # Default limit
+            
+            # Extract limit if present
+            limit_match = re.search(r'\.limit\((\d+)\)', query_string)
+            if limit_match:
+                limit = int(limit_match.group(1))
+                # Remove the limit part from the query
+                query_string = re.sub(r'\.limit\(\d+\)', '', query_string)
+            
+            # Parse the main operation
+            match = re.match(r'db\.([a-zA-Z0-9_]+)\.([a-zA-Z]+)\((.*)\)', query_string)
+            if not match:
+                raise ValueError("Invalid MongoDB query format. Expected: db.collection.operation({query})")
+                
+            collection_name = match.group(1)
+            operation = match.group(2)
+            query_params = match.group(3).strip()
+
+            if not query_params:
+                query_params = '{}'
+                
+            # Handle different parameter formats
+            if query_params.startswith('[') and query_params.endswith(']'):
+                # Array parameter (for aggregate)
+                params_obj = json.loads(query_params)
+            elif query_params.startswith('{') and query_params.endswith('}'):
+                # Object parameter (for find, insertOne, etc.)
+                params_obj = json.loads(query_params)
+            else:
+                # Try to parse as JSON
+                params_obj = json.loads(query_params)
+            
+            options = {}
+            
+            # Security check for dangerous operations
+            if operation.lower() in ["drop", "dropdatabase", "deletemany"]:
+                raise ValueError(f"Operation '{operation}' is not allowed for security reasons")
+                
+            return operation, collection_name, params_obj, options, limit
+            
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in query: {str(e)}")
+        except Exception as e:
+            raise ValueError(f"Failed to parse MongoDB query: {str(e)}")
+    
+    def execute_query(self, query: str) -> Dict[str, Any]:
+        """Execute MongoDB query"""
+        start_time = __import__('time').time()
+        result = {
+            "type": "error",
+            "message": "",
+            "executionTimeMs": 0
+        }
+        
+        try:
+            db = self.connect()   
+            operation, collection_name, query_obj, options, limit = self._parse_mongo_query(query)  
+            if operation.lower() == "find":
+                collection = db[collection_name]
+                cursor = collection.find(query_obj).limit(limit)
+                documents = list(cursor)
+                if documents:
+                    all_keys = set()
+                    for doc in documents:
+                        self._extract_keys(doc, all_keys)
+
+                    columns = sorted(list(all_keys))
+
+                    rows = []
+                    for doc in documents:
+                        row = []
+                        for key in columns:
+                            value = self._get_nested_value(doc, key)
+                            if ObjectId and isinstance(value, ObjectId):
+                                value = str(value)
+                            elif str(type(value)).find('ObjectId') != -1:
+                                value = str(value)
+                                
+                            row.append(value)
+                        rows.append(row)
+                        
+                    result.update({
+                        "type": "select",
+                        "columns": [{"name": col, "type": "string"} for col in columns],
+                        "rows": rows,
+                        "rowCount": len(documents),
+                    })
+                else:
+                    result.update({
+                        "type": "select",
+                        "columns": [],
+                        "rows": [],
+                        "rowCount": 0,
+                    })
+                
+            elif operation.lower() == "aggregate":
+                collection = db[collection_name]
+                documents = list(collection.aggregate(query_obj))
+                if documents:
+                    all_keys = set()
+                    for doc in documents:
+                        self._extract_keys(doc, all_keys)
+                        
+                    columns = sorted(list(all_keys))
+                    rows = []
+                    
+                    for doc in documents:
+                        row = []
+                        for key in columns:
+                            value = self._get_nested_value(doc, key)
+                            if ObjectId and isinstance(value, ObjectId):
+                                value = str(value)
+                            elif str(type(value)).find('ObjectId') != -1:
+                                value = str(value)
+                                
+                            row.append(value)
+                        rows.append(row)
+                        
+                    result.update({
+                        "type": "select",
+                        "columns": [{"name": col, "type": "string"} for col in columns],
+                        "rows": rows,
+                        "rowCount": len(documents),
+                    })
+                else:
+                    # No documents found
+                    result.update({
+                        "type": "select",
+                        "columns": [],
+                        "rows": [],
+                        "rowCount": 0,
+                    })
+                
+            elif operation.lower() == "insertone":
+                # Get the collection
+                collection = db[collection_name]
+                
+                # Execute insertOne operation
+                insert_result = collection.insert_one(query_obj)
+                
+                result.update({
+                    "type": "write",
+                    "affectedRows": 1,
+                    "message": f"Inserted document with ID: {insert_result.inserted_id}"
+                })
+                
+            elif operation.lower() == "updateone":
+                # For updateOne, we expect two parameters: filter and update
+                if not isinstance(query_obj, dict) or len(query_obj) != 2:
+                    raise ValueError("updateOne requires two objects: filter and update")
+                
+                # Get filter and update objects
+                filter_obj = list(query_obj.values())[0]
+                update_obj = list(query_obj.values())[1]
+                
+                # Get the collection
+                collection = db[collection_name]
+                
+                # Execute updateOne operation
+                update_result = collection.update_one(filter_obj, update_obj)
+                
+                result.update({
+                    "type": "write",
+                    "affectedRows": update_result.modified_count,
+                    "message": f"{update_result.modified_count} document(s) updated"
+                })
+                
+            elif operation.lower() == "deleteone":
+                # Get the collection
+                collection = db[collection_name]
+                
+                # Execute deleteOne operation
+                delete_result = collection.delete_one(query_obj)
+                
+                result.update({
+                    "type": "write",
+                    "affectedRows": delete_result.deleted_count,
+                    "message": f"{delete_result.deleted_count} document(s) deleted"
+                })
+                
+            else:
+                raise ValueError(f"Unsupported MongoDB operation: {operation}")
+                
+        except Exception as e:
+            result.update({
+                "message": str(e),
+            })
+            
+        # Add execution time
+        result["executionTimeMs"] = (__import__('time').time() - start_time) * 1000
+        return result
+    
+    def _extract_keys(self, document: Dict, keys: set, prefix: str = "") -> None:
+        """Extract all keys from a nested document, including flattened paths for nested objects"""
+        for key, value in document.items():
+            # Skip internal MongoDB keys like _id
+            if key == "_id":
+                # Add _id as a regular key, but don't descend into it
+                keys.add(prefix + key if prefix else key)
+                continue
+                
+            # Add the current key
+            flat_key = prefix + key if prefix else key
+            keys.add(flat_key)
+            
+            # If the value is a nested document, recurse
+            if isinstance(value, dict):
+                self._extract_keys(value, keys, flat_key + ".")
+    
+    def _get_nested_value(self, document: Dict, flat_key: str):
+        """Get value from a document using a flattened key path (e.g., 'address.city')"""
+        if "." not in flat_key:
+            # Direct key
+            return document.get(flat_key)
+        
+        # Split the key path
+        parts = flat_key.split(".", 1)
+        key, rest = parts
+        
+        # Get the nested document
+        nested_doc = document.get(key)
+        
+        # If nested document exists and is a dictionary, recurse
+        if nested_doc and isinstance(nested_doc, dict):
+            return self._get_nested_value(nested_doc, rest)
+        
+        # Otherwise, return None
+        return None
+    
+    def get_schema(self) -> Dict[str, Any]:
+        """Get MongoDB database schema (collections and their structure)"""
+        db = self.connect()
+        
+        try:
+            # Get list of all collections
+            collection_names = db.list_collection_names()
+            
+            result = {
+                "database": self.config["database"],
+                "tables": []  # Collections will be treated as tables
+            }
+            
+            for collection_name in collection_names:
+                # Get info about this collection
+                collection_info = self.get_table_info(collection_name)
+                result["tables"].append(collection_info)
+            
+            return result
+            
+        except Exception as e:
+            return {
+                "database": self.config["database"],
+                "error": str(e),                "tables": []
+            }
+    
+    def _convert_objectids_to_strings(self, data):
+        """Recursively convert ObjectId instances to strings for JSON serialization"""
+        if isinstance(data, list):
+            return [self._convert_objectids_to_strings(item) for item in data]
+        elif isinstance(data, dict):
+            return {key: self._convert_objectids_to_strings(value) for key, value in data.items()}
+        elif ObjectId and isinstance(data, ObjectId):
+            return str(data)
+        elif str(type(data)).find('ObjectId') != -1:
+            return str(data)
+        else:
+            return data
+
+    def get_table_info(self, table_name: str) -> Dict[str, Any]:
+        """Get detailed information about a specific collection"""
+        db = self.connect()
+        
+        try:
+            # Access the collection
+            collection = db[table_name]
+            
+            # Get sample documents to infer schema
+            sample_documents = list(collection.find().limit(5))
+            
+            # Convert ObjectIds to strings in sample documents for JSON serialization
+            serializable_sample_documents = self._convert_objectids_to_strings(sample_documents)
+            
+            # Count total documents
+            document_count = collection.count_documents({})
+            
+            # Infer schema from sample documents
+            all_fields = set()
+            for doc in sample_documents:
+                self._extract_keys(doc, all_fields)
+            
+            # Convert to column definitions
+            columns = []
+            for field in sorted(all_fields):
+                # For MongoDB, we don't have strong typing information
+                columns.append({
+                    "name": field,
+                    "type": "DYNAMIC",  # MongoDB has dynamic types
+                    "nullable": True,  # Fields in MongoDB are nullable by default
+                    "isPrimaryKey": field == "_id",  # _id is the only guaranteed primary key
+                    "isForeignKey": False,  # No foreign key concept in MongoDB
+                    "references": None
+                })
+            
+            # Get indexes (optional)
+            indexes = []
+            for index in collection.list_indexes():
+                index_info = {
+                    "name": index["name"],
+                    "fields": list(index["key"].keys()),
+                    "unique": index.get("unique", False)
+                }
+                indexes.append(index_info)
+            
+            return {
+                "tableName": table_name,
+                "rowCount": document_count,
+                "columns": columns,
+                "indexes": indexes,
+                "sampleRows": serializable_sample_documents,
+                "isMongoDB": True  # Flag to indicate this is a MongoDB collection
+            }
+        except Exception as e:
+            return {
+                "tableName": table_name,
+                "error": str(e),
+                "columns": [],
+                "rowCount": 0,
+                "isMongoDB": True
+            }
+
 def create_connector(config: Dict[str, Any]) -> DatabaseConnector:
-    """Create and return the appropriate database connector based on the configuration
+    """Factory function to create the appropriate database connector
     
     Args:
-        config: Dict containing connection details and database_type
+        config: Dictionary containing connection configuration with 'database_type' key
         
     Returns:
-        An instance of the appropriate DatabaseConnector implementation
+        DatabaseConnector: Appropriate connector instance
         
     Raises:
         ValueError: If database_type is not supported
-        ImportError: If required database driver module is not installed
     """
-    # Make sure we're explicitly getting the database_type from the config
-    db_type = config.get("database_type")
+    database_type = config.get("database_type", "mysql").lower()
     
-    # If db_type is None or empty, default to mysql
-    if not db_type:
-        db_type = "mysql"
-    
-    # Convert to lowercase for case-insensitive comparison
-    db_type = db_type.lower()
-    
-    # Log the database type we're using
-    print(f"Creating connector for database type: {db_type}")
-    
-    try:
-        if db_type == "mysql":
-            # Use mysql-connector-python
-            return MySQLConnector(config)
-            
-        elif db_type == "postgres" or db_type == "postgresql":
-            # Use psycopg2 for PostgreSQL
-            try:
-                return PostgreSQLConnector(config)
-            except ImportError:
-                raise ImportError("psycopg2-binary is required for PostgreSQL connections. Install with 'pip install psycopg2-binary'")
-            
-        elif db_type == "sqlite":
-            # Use SQLAlchemy with SQLite
-            return SQLiteConnector(config)
-                
-        elif db_type == "mssql":
-            # Use pyodbc for MS SQL Server
-            try:
-                return MSSQLConnector(config)
-            except ImportError:
-                raise ImportError("pyodbc is required for MS SQL Server connections. Install with 'pip install pyodbc'")
-                
-        elif db_type == "mongodb":
-            # Use pymongo for MongoDB
-            try:
-                # Will be implemented with MongoDBConnector
-                # return MongoDBConnector(config)
-                raise NotImplementedError("MongoDB support is implemented but not yet enabled")
-            except ImportError:
-                raise ImportError("pymongo is required for MongoDB connections. Install with 'pip install pymongo'")
-                
-        else:
-            raise ValueError(f"Unsupported database type: {db_type}")
-            
-    except ImportError as e:
-        # Catch and re-raise import errors with helpful message
-        raise ImportError(f"Failed to import required database driver: {str(e)}")
-    except Exception as e:
-        # Catch all other exceptions
-        raise RuntimeError(f"Error creating database connector for {db_type}: {str(e)}")
+    if database_type == "mysql":
+        return MySQLConnector(config)
+    elif database_type == "sqlite":
+        return SQLiteConnector(config)
+    elif database_type == "postgresql" or database_type == "postgres":
+        if psycopg2 is None:
+            raise ValueError("PostgreSQL support requires psycopg2 to be installed")
+        return PostgreSQLConnector(config)
+    elif database_type == "mssql" or database_type == "sqlserver":
+        if pyodbc is None:
+            raise ValueError("MSSQL support requires pyodbc to be installed")
+        return MSSQLConnector(config)
+    elif database_type == "mongodb" or database_type == "mongo":
+        if pymongo is None:
+            raise ValueError("MongoDB support requires pymongo to be installed")
+        return MongoDBConnector(config)
+    else:
+        raise ValueError(f"Unsupported database type: {database_type}")

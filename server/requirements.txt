@@ -6,3 +6,4 @@ mysql-connector-python
 psycopg2-binary
 SQLAlchemy
 pyodbc
+pymongo
