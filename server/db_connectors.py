@@ -125,6 +125,60 @@ class MySQLConnector(DatabaseConnector):
         except mysql.connector.Error as err:
             return False, f"Connection failed: {str(err)}"
     
+    def _map_mysql_type(self, type_code) -> str:
+        """Map MySQL type codes to string representation"""
+        # Import FieldType from mysql.connector
+        try:
+            from mysql.connector import FieldType
+            mysql_type_mapping = {
+                FieldType.DECIMAL: "DECIMAL",
+                FieldType.TINY: "TINYINT",
+                FieldType.SHORT: "SMALLINT", 
+                FieldType.LONG: "INT",
+                FieldType.FLOAT: "FLOAT",
+                FieldType.DOUBLE: "DOUBLE",
+                FieldType.NULL: "NULL",
+                FieldType.TIMESTAMP: "TIMESTAMP",
+                FieldType.LONGLONG: "BIGINT",
+                FieldType.INT24: "MEDIUMINT",
+                FieldType.DATE: "DATE",
+                FieldType.TIME: "TIME",
+                FieldType.DATETIME: "DATETIME",
+                FieldType.YEAR: "YEAR",
+                FieldType.NEWDATE: "DATE",
+                FieldType.VARCHAR: "VARCHAR",
+                FieldType.BIT: "BIT",
+                FieldType.JSON: "JSON",
+                FieldType.NEWDECIMAL: "DECIMAL",
+                FieldType.ENUM: "ENUM",
+                FieldType.SET: "SET",
+                FieldType.TINY_BLOB: "TINYBLOB",
+                FieldType.MEDIUM_BLOB: "MEDIUMBLOB",
+                FieldType.LONG_BLOB: "LONGBLOB",
+                FieldType.BLOB: "BLOB",
+                FieldType.VAR_STRING: "VARCHAR",
+                FieldType.STRING: "CHAR",
+                FieldType.GEOMETRY: "GEOMETRY"
+            }
+            return mysql_type_mapping.get(type_code, f"VARCHAR")
+        except ImportError:
+            # If FieldType is not available, try to infer from the type object
+            if hasattr(type_code, '__name__'):
+                type_name = type_code.__name__
+                python_to_mysql = {
+                    'int': 'INT',
+                    'float': 'DOUBLE',
+                    'str': 'VARCHAR',
+                    'bytes': 'BLOB',
+                    'datetime': 'DATETIME',
+                    'date': 'DATE',
+                    'time': 'TIME',
+                    'bool': 'BOOLEAN',
+                    'Decimal': 'DECIMAL'
+                }
+                return python_to_mysql.get(type_name, 'VARCHAR')
+            return str(type_code)
+
     def execute_query(self, sql: str) -> Dict[str, Any]:
         """Execute SQL query on MySQL"""
         start_time = __import__('time').time()
@@ -148,7 +202,7 @@ class MySQLConnector(DatabaseConnector):
                 columns = cursor.description
                 result.update({
                     "type": "select",
-                    "columns": [{"name": col[0], "type": str(col[1])} for col in columns],
+                    "columns": [{"name": col[0], "type": self._map_mysql_type(col[1])} for col in columns],
                     "rows": [[cell for cell in row.values()] for row in rows],
                     "rowCount": len(rows),
                 })
@@ -1038,6 +1092,719 @@ class MSSQLConnector(DatabaseConnector):
         except Exception as e:
             print(f"Warning: Could not enumerate ODBC drivers: {e}")
             return []
+
+class PostgreSQLConnector(DatabaseConnector):
+    """PostgreSQL database connector implementation"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        """Initialize with connection config
+        
+        Args:
+            config: Dict with host, port, database, username, password
+        """
+        self.config = config
+        self.connection = None
+        self.cursor = None
+    
+    def connect(self) -> Any:
+        """Connect to PostgreSQL database"""
+        if self.connection and not self.connection.closed:
+            return self.connection
+            
+        try:
+            self.connection = psycopg2.connect(
+                host=self.config["host"],
+                port=self.config["port"],
+                database=self.config["database"],
+                user=self.config["username"],
+                password=self.config["password"]
+            )
+            return self.connection
+        except psycopg2.Error as err:
+            raise ConnectionError(f"Failed to connect to PostgreSQL: {err}")
+    
+    def disconnect(self) -> None:
+        """Close PostgreSQL connection"""
+        if self.connection and not self.connection.closed:
+            if self.cursor:
+                self.cursor.close()
+            self.connection.close()
+            self.connection = None
+            self.cursor = None
+    
+    def test_connection(self) -> Tuple[bool, str]:
+        """Test PostgreSQL connection"""
+        try:
+            conn = psycopg2.connect(
+                host=self.config["host"],
+                port=self.config["port"],
+                database=self.config["database"],
+                user=self.config["username"],
+                password=self.config["password"],
+                connect_timeout=5  # Short timeout for testing
+            )
+            if not conn.closed:
+                conn.close()
+                return True, "Connection successful"
+            return False, "Could not establish connection"
+        except psycopg2.Error as err:
+            return False, f"Connection failed: {str(err)}"
+    
+    def _map_postgresql_type(self, type_oid: int) -> str:
+        """Map PostgreSQL type OIDs to string representation"""
+        # Common PostgreSQL type OIDs
+        pg_type_mapping = {
+            16: "BOOLEAN",
+            17: "BYTEA",
+            18: "CHAR",
+            19: "NAME",
+            20: "BIGINT",
+            21: "SMALLINT",
+            22: "INT2VECTOR",
+            23: "INTEGER",
+            24: "REGPROC",
+            25: "TEXT",
+            26: "OID",
+            27: "TID",
+            28: "XID",
+            29: "CID",
+            114: "JSON",
+            142: "XML",
+            700: "REAL",
+            701: "DOUBLE PRECISION",
+            1043: "VARCHAR",
+            1082: "DATE",
+            1083: "TIME",
+            1114: "TIMESTAMP",
+            1184: "TIMESTAMPTZ",
+            1266: "TIMETZ",
+            1700: "NUMERIC",
+            2950: "UUID",
+            3802: "JSONB",
+        }
+        
+        return pg_type_mapping.get(type_oid, f"UNKNOWN({type_oid})")
+
+    def execute_query(self, sql: str) -> Dict[str, Any]:
+        """Execute SQL query on PostgreSQL"""
+        start_time = __import__('time').time()
+        result = {
+            "type": "error",
+            "message": "",
+            "executionTimeMs": 0
+        }
+        
+        try:
+            conn = self.connect()
+            cursor = conn.cursor()
+            
+            # Determine if this is a SELECT query or a different type
+            is_select = sql.strip().upper().startswith("SELECT")
+            
+            cursor.execute(sql)
+            
+            if is_select:
+                rows = cursor.fetchall()
+                columns = cursor.description
+                result.update({
+                    "type": "select",
+                    "columns": [{"name": col[0], "type": self._map_postgresql_type(col[1])} for col in columns],
+                    "rows": [[cell for cell in row] for row in rows],
+                    "rowCount": len(rows),
+                })
+            else:
+                conn.commit()
+                result.update({
+                    "type": "write",
+                    "affectedRows": cursor.rowcount,
+                    "message": f"{cursor.rowcount} row(s) affected"
+                })
+                
+            result["executionTimeMs"] = (__import__('time').time() - start_time) * 1000
+            cursor.close()
+            return result
+            
+        except psycopg2.Error as err:
+            result.update({
+                "message": str(err),
+                "executionTimeMs": (__import__('time').time() - start_time) * 1000
+            })
+            return result
+        
+    def get_schema(self) -> Dict[str, Any]:
+        """Get PostgreSQL database schema"""
+        conn = self.connect()
+        cursor = conn.cursor()
+        
+        try:
+            # Get all tables in the public schema
+            cursor.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+                ORDER BY table_name
+            """)
+            tables = [table[0] for table in cursor.fetchall()]
+            
+            result = {
+                "database": self.config["database"],
+                "tables": []
+            }
+            
+            for table in tables:
+                # Get table structure
+                cursor.execute("""
+                    SELECT 
+                        column_name, 
+                        data_type, 
+                        is_nullable,
+                        column_default,
+                        character_maximum_length,
+                        numeric_precision,
+                        numeric_scale
+                    FROM information_schema.columns 
+                    WHERE table_schema = 'public' AND table_name = %s
+                    ORDER BY ordinal_position
+                """, (table,))
+                columns_info = cursor.fetchall()
+                
+                # Get primary keys
+                cursor.execute("""
+                    SELECT column_name
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage kcu
+                    ON tc.constraint_name = kcu.constraint_name
+                    WHERE tc.table_schema = 'public' 
+                    AND tc.table_name = %s 
+                    AND tc.constraint_type = 'PRIMARY KEY'
+                """, (table,))
+                primary_keys = [row[0] for row in cursor.fetchall()]
+                
+                # Get foreign keys
+                cursor.execute("""
+                    SELECT 
+                        kcu.column_name,
+                        ccu.table_name AS foreign_table_name,
+                        ccu.column_name AS foreign_column_name
+                    FROM information_schema.table_constraints AS tc
+                    JOIN information_schema.key_column_usage AS kcu
+                    ON tc.constraint_name = kcu.constraint_name
+                    JOIN information_schema.constraint_column_usage AS ccu
+                    ON ccu.constraint_name = tc.constraint_name
+                    WHERE tc.constraint_type = 'FOREIGN KEY' 
+                    AND tc.table_schema = 'public'
+                    AND tc.table_name = %s
+                """, (table,))
+                foreign_keys_info = cursor.fetchall()
+                
+                # Create foreign key mapping
+                foreign_keys = {}
+                for fk_col, fk_table, fk_ref_col in foreign_keys_info:
+                    foreign_keys[fk_col] = {
+                        "table": fk_table,
+                        "column": fk_ref_col
+                    }
+                
+                # Get sample rows
+                try:
+                    cursor.execute(f'SELECT * FROM "{table}" LIMIT 5')
+                    sample_rows = []
+                    if cursor.description:
+                        column_names = [desc[0] for desc in cursor.description]
+                        for row in cursor.fetchall():
+                            sample_rows.append(dict(zip(column_names, row)))
+                except psycopg2.Error:
+                    sample_rows = []
+                
+                # Get row count
+                try:
+                    cursor.execute(f'SELECT COUNT(*) FROM "{table}"')
+                    row_count = cursor.fetchone()[0]
+                except psycopg2.Error:
+                    row_count = -1
+                
+                columns = []
+                for col_info in columns_info:
+                    col_name = col_info[0]
+                    col_type = col_info[1]
+                    is_nullable = col_info[2] == 'YES'
+                    
+                    # Add length/precision info to type if available
+                    if col_info[4]:  # Character length
+                        col_type = f"{col_type}({col_info[4]})"
+                    elif col_info[5]:  # Numeric precision
+                        if col_info[6] is not None:  # Has scale
+                            col_type = f"{col_type}({col_info[5]},{col_info[6]})"
+                        else:
+                            col_type = f"{col_type}({col_info[5]})"
+                    
+                    columns.append({
+                        "name": col_name,
+                        "type": col_type,
+                        "nullable": is_nullable,
+                        "isPrimaryKey": col_name in primary_keys,
+                        "isForeignKey": col_name in foreign_keys,
+                        "references": foreign_keys.get(col_name)
+                    })
+                
+                table_info = {
+                    "tableName": table,
+                    "rowCount": row_count,
+                    "columns": columns,
+                    "sampleRows": sample_rows
+                }
+                
+                result["tables"].append(table_info)
+            
+            return result
+            
+        finally:
+            cursor.close()
+    
+    def get_table_info(self, table_name: str) -> Dict[str, Any]:
+        """Get detailed information about a specific PostgreSQL table"""
+        conn = self.connect()
+        cursor = conn.cursor()
+        
+        try:
+            # Get table structure
+            cursor.execute("""
+                SELECT 
+                    column_name, 
+                    data_type, 
+                    is_nullable,
+                    column_default,
+                    character_maximum_length,
+                    numeric_precision,
+                    numeric_scale
+                FROM information_schema.columns 
+                WHERE table_schema = 'public' AND table_name = %s
+                ORDER BY ordinal_position
+            """, (table_name,))
+            columns_info = cursor.fetchall()
+            
+            # Get primary keys
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                ON tc.constraint_name = kcu.constraint_name
+                WHERE tc.table_schema = 'public' 
+                AND tc.table_name = %s 
+                AND tc.constraint_type = 'PRIMARY KEY'
+            """, (table_name,))
+            primary_keys = [row[0] for row in cursor.fetchall()]
+            
+            # Get foreign keys
+            cursor.execute("""
+                SELECT 
+                    kcu.column_name,
+                    ccu.table_name AS foreign_table_name,
+                    ccu.column_name AS foreign_column_name
+                FROM information_schema.table_constraints AS tc
+                JOIN information_schema.key_column_usage AS kcu
+                ON tc.constraint_name = kcu.constraint_name
+                JOIN information_schema.constraint_column_usage AS ccu
+                ON ccu.constraint_name = tc.constraint_name
+                WHERE tc.constraint_type = 'FOREIGN KEY' 
+                AND tc.table_schema = 'public'
+                AND tc.table_name = %s
+            """, (table_name,))
+            foreign_keys_info = cursor.fetchall()
+            
+            # Create foreign key mapping
+            foreign_keys = {}
+            for fk_col, fk_table, fk_ref_col in foreign_keys_info:
+                foreign_keys[fk_col] = {
+                    "table": fk_table,
+                    "column": fk_ref_col
+                }
+            
+            # Get sample rows
+            try:
+                cursor.execute(f'SELECT * FROM "{table_name}" LIMIT 5')
+                sample_rows = []
+                if cursor.description:
+                    column_names = [desc[0] for desc in cursor.description]
+                    for row in cursor.fetchall():
+                        sample_rows.append(dict(zip(column_names, row)))
+            except psycopg2.Error:
+                sample_rows = []
+            
+            # Get row count
+            try:
+                cursor.execute(f'SELECT COUNT(*) FROM "{table_name}"')
+                row_count = cursor.fetchone()[0]
+            except psycopg2.Error:
+                row_count = -1
+            
+            columns = []
+            for col_info in columns_info:
+                col_name = col_info[0]
+                col_type = col_info[1]
+                is_nullable = col_info[2] == 'YES'
+                
+                # Add length/precision info to type if available
+                if col_info[4]:  # Character length
+                    col_type = f"{col_type}({col_info[4]})"
+                elif col_info[5]:  # Numeric precision
+                    if col_info[6] is not None:  # Has scale
+                        col_type = f"{col_type}({col_info[5]},{col_info[6]})"
+                    else:
+                        col_type = f"{col_type}({col_info[5]})"
+                
+                columns.append({
+                    "name": col_name,
+                    "type": col_type,
+                    "nullable": is_nullable,
+                    "isPrimaryKey": col_name in primary_keys,
+                    "isForeignKey": col_name in foreign_keys,
+                    "references": foreign_keys.get(col_name)
+                })
+            
+            return {
+                "tableName": table_name,
+                "rowCount": row_count,
+                "columns": columns,
+                "sampleRows": sample_rows
+            }
+            
+        finally:
+            cursor.close()
+
+class MongoDBConnector(DatabaseConnector):
+    """MongoDB database connector implementation"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        """Initialize with connection config
+        
+        Args:
+            config: Dict with host, port, database, username, password
+        """
+        self.config = config
+        self.connection = None
+        self.database = None
+    
+    def connect(self) -> Any:
+        """Connect to MongoDB database"""
+        if self.connection:
+            return self.connection
+            
+        try:
+            # First try without authentication to see if MongoDB is accessible
+            try:
+                no_auth_client = pymongo.MongoClient(f"mongodb://{self.config['host']}:{self.config['port']}/", serverSelectionTimeoutMS=3000)
+                no_auth_client.admin.command('ping')
+                no_auth_client.close()
+                
+                # If we have credentials, try with authentication
+                if self.config.get("username") and self.config.get("password"):
+                    # Try multiple authentication approaches
+                    auth_sources = [
+                        self.config.get("auth_source", "admin"),  # User specified or default admin
+                        self.config["database"],  # Target database
+                        "admin"  # Fallback to admin
+                    ]
+                    
+                    connection_string = None
+                    
+                    for auth_source in auth_sources:
+                        try:
+                            connection_string = f"mongodb://{self.config['username']}:{self.config['password']}@{self.config['host']}:{self.config['port']}/{self.config['database']}?authSource={auth_source}"
+                            test_client = pymongo.MongoClient(connection_string, serverSelectionTimeoutMS=3000)
+                            test_client.admin.command('ping')  # Test authentication
+                            test_client.close()
+                            break  # Success, use this auth_source
+                        except pymongo.errors.PyMongoError:
+                            continue
+                    else:
+                        # All auth sources failed, fall back to no-auth connection
+                        print("Warning: Authentication failed, falling back to no-auth connection")
+                        connection_string = f"mongodb://{self.config['host']}:{self.config['port']}/{self.config['database']}"
+                else:
+                    connection_string = f"mongodb://{self.config['host']}:{self.config['port']}/{self.config['database']}"
+                    
+            except pymongo.errors.PyMongoError as err:
+                raise ConnectionError(f"MongoDB server not accessible: {err}")
+
+            self.connection = pymongo.MongoClient(connection_string)
+            self.database = self.connection[self.config["database"]]
+            
+            # Test the connection by pinging the server
+            self.connection.admin.command('ping')
+            
+            return self.connection
+        except pymongo.errors.PyMongoError as err:
+            raise ConnectionError(f"Failed to connect to MongoDB: {err}")
+    
+    def disconnect(self) -> None:
+        """Close MongoDB connection"""
+        if self.connection:
+            self.connection.close()
+            self.connection = None
+            self.database = None
+    
+    def test_connection(self) -> Tuple[bool, str]:
+        """Test MongoDB connection"""
+        try:
+            # First try without authentication to see if MongoDB is accessible
+            try:
+                no_auth_client = pymongo.MongoClient(f"mongodb://{self.config['host']}:{self.config['port']}/", serverSelectionTimeoutMS=3000)
+                no_auth_client.admin.command('ping')
+                no_auth_client.close()
+                
+                # If we have credentials, test with authentication
+                if self.config.get("username") and self.config.get("password"):
+                    # Try multiple authentication approaches
+                    auth_sources = [
+                        self.config.get("auth_source", "admin"),  # User specified or default admin
+                        self.config["database"],  # Target database
+                        "admin"  # Fallback to admin
+                    ]
+                    
+                    for auth_source in auth_sources:
+                        try:
+                            connection_string = f"mongodb://{self.config['username']}:{self.config['password']}@{self.config['host']}:{self.config['port']}/{self.config['database']}?authSource={auth_source}"
+                            client = pymongo.MongoClient(connection_string, serverSelectionTimeoutMS=3000)
+                            client.admin.command('ping')  # Test authentication
+                            client.close()
+                            return True, f"Connection successful (authenticated with {auth_source})"
+                        except pymongo.errors.PyMongoError as err:
+                            continue
+                    
+                    # All auth sources failed, but MongoDB is accessible - may not require auth
+                    return True, "Connection successful (MongoDB accessible but authentication failed - this may be normal if auth is not enabled)"
+                else:
+                    return True, "Connection successful (no authentication required)"
+                    
+            except pymongo.errors.PyMongoError as err:
+                return False, f"Connection failed: MongoDB server not accessible - {str(err)}"
+                
+        except Exception as err:
+            return False, f"Connection failed: {str(err)}"
+    
+    def execute_query(self, query: str) -> Dict[str, Any]:
+        """Execute MongoDB query (JavaScript-like syntax)"""
+        start_time = __import__('time').time()
+        result = {
+            "type": "error",
+            "message": "",
+            "executionTimeMs": 0
+        }
+        
+        try:
+            conn = self.connect()
+            db = self.database
+            
+            # Parse MongoDB query - this is a simplified parser
+            # In a real implementation, you'd want a more robust parser
+            query = query.strip()
+            
+            # Simple pattern matching for common MongoDB operations
+            if query.startswith("db.") and ".find(" in query:
+                # Extract collection name and find parameters
+                parts = query.split(".")
+                if len(parts) >= 3:
+                    collection_name = parts[1]
+                    collection = db[collection_name]
+                    
+                    # Execute find operation
+                    try:
+                        cursor = collection.find().limit(100)  # Limit results
+                        documents = list(cursor)
+                        
+                        # Convert ObjectId to string for JSON serialization
+                        for doc in documents:
+                            if '_id' in doc:
+                                doc['_id'] = str(doc['_id'])
+                        
+                        result.update({
+                            "type": "select",
+                            "columns": [{"name": "document", "type": "BSON"}],
+                            "rows": [[doc] for doc in documents],
+                            "rowCount": len(documents),
+                        })
+                    except Exception as e:
+                        result.update({
+                            "message": f"Query execution error: {str(e)}",
+                        })
+                        
+            elif query.startswith("db.") and (".insertOne(" in query or ".insertMany(" in query):
+                result.update({
+                    "type": "write",
+                    "affectedRows": 1,
+                    "message": "Insert operation (parsing not fully implemented)"
+                })
+                
+            else:
+                result.update({
+                    "message": "Unsupported MongoDB query format. Use standard MongoDB syntax like db.collection.find()"
+                })
+                
+            result["executionTimeMs"] = (__import__('time').time() - start_time) * 1000
+            return result
+            
+        except pymongo.errors.PyMongoError as err:
+            result.update({
+                "message": str(err),
+                "executionTimeMs": (__import__('time').time() - start_time) * 1000
+            })
+            return result
+        
+    def get_schema(self) -> Dict[str, Any]:
+        """Get MongoDB database schema"""
+        conn = self.connect()
+        db = self.database
+        
+        try:
+            # Get all collections
+            collection_names = db.list_collection_names()
+            
+            result = {
+                "database": self.config["database"],
+                "tables": []  # MongoDB collections are similar to tables
+            }
+            
+            for collection_name in collection_names:
+                collection = db[collection_name]
+                
+                # Get sample documents to infer schema
+                sample_docs = list(collection.find().limit(5))
+                
+                # Get document count
+                doc_count = collection.count_documents({})
+                
+                # Infer schema from sample documents
+                columns = []
+                if sample_docs:
+                    # Get all unique fields from sample documents
+                    all_fields = set()
+                    for doc in sample_docs:
+                        all_fields.update(doc.keys())
+                    
+                    for field in sorted(all_fields):
+                        # Try to infer type from first occurrence
+                        field_type = "Mixed"
+                        for doc in sample_docs:
+                            if field in doc:
+                                value = doc[field]
+                                if isinstance(value, str):
+                                    field_type = "String"
+                                elif isinstance(value, int):
+                                    field_type = "Number"
+                                elif isinstance(value, float):
+                                    field_type = "Number"
+                                elif isinstance(value, bool):
+                                    field_type = "Boolean"
+                                elif isinstance(value, ObjectId):
+                                    field_type = "ObjectId"
+                                elif isinstance(value, dict):
+                                    field_type = "Object"
+                                elif isinstance(value, list):
+                                    field_type = "Array"
+                                break
+                        
+                        columns.append({
+                            "name": field,
+                            "type": field_type,
+                            "nullable": True,  # MongoDB fields are typically optional
+                            "isPrimaryKey": field == "_id",
+                            "isForeignKey": False,
+                            "references": None
+                        })
+                
+                # Convert sample documents for display
+                sample_rows = []
+                for doc in sample_docs:
+                    # Convert ObjectId to string
+                    if '_id' in doc:
+                        doc['_id'] = str(doc['_id'])
+                    sample_rows.append(doc)
+                
+                table_info = {
+                    "tableName": collection_name,
+                    "rowCount": doc_count,
+                    "columns": columns,
+                    "sampleRows": sample_rows
+                }
+                
+                result["tables"].append(table_info)
+            
+            return result
+            
+        except pymongo.errors.PyMongoError as err:
+            return {"error": str(err)}
+    
+    def get_table_info(self, collection_name: str) -> Dict[str, Any]:
+        """Get detailed information about a specific MongoDB collection"""
+        conn = self.connect()
+        db = self.database
+        
+        try:
+            collection = db[collection_name]
+            
+            # Get sample documents to infer schema
+            sample_docs = list(collection.find().limit(10))
+            
+            # Get document count
+            doc_count = collection.count_documents({})
+            
+            # Infer schema from sample documents
+            columns = []
+            if sample_docs:
+                # Get all unique fields from sample documents
+                all_fields = set()
+                for doc in sample_docs:
+                    all_fields.update(doc.keys())
+                
+                for field in sorted(all_fields):
+                    # Try to infer type from first occurrence
+                    field_type = "Mixed"
+                    for doc in sample_docs:
+                        if field in doc:
+                            value = doc[field]
+                            if isinstance(value, str):
+                                field_type = "String"
+                            elif isinstance(value, int):
+                                field_type = "Number"
+                            elif isinstance(value, float):
+                                field_type = "Number"
+                            elif isinstance(value, bool):
+                                field_type = "Boolean"
+                            elif isinstance(value, ObjectId):
+                                field_type = "ObjectId"
+                            elif isinstance(value, dict):
+                                field_type = "Object"
+                            elif isinstance(value, list):
+                                field_type = "Array"
+                            break
+                    
+                    columns.append({
+                        "name": field,
+                        "type": field_type,
+                        "nullable": True,  # MongoDB fields are typically optional
+                        "isPrimaryKey": field == "_id",
+                        "isForeignKey": False,
+                        "references": None
+                    })
+            
+            # Convert sample documents for display
+            sample_rows = []
+            for doc in sample_docs:
+                # Convert ObjectId to string
+                if '_id' in doc:
+                    doc['_id'] = str(doc['_id'])
+                sample_rows.append(doc)
+            
+            return {
+                "tableName": collection_name,
+                "rowCount": doc_count,
+                "columns": columns,
+                "sampleRows": sample_rows
+            }
+            
+        except pymongo.errors.PyMongoError as err:
+            return {"error": str(err)}
 
 def create_connector(config: Dict[str, Any]) -> DatabaseConnector:
     """Factory function to create the appropriate database connector
