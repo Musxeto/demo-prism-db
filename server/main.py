@@ -187,6 +187,50 @@ def get_action_logs() -> List[dict]:
         cur.execute('SELECT * FROM action_logs ORDER BY created_at DESC LIMIT 100')
         return cur.fetchall()
 
+# Saved Queries API endpoints
+@app.get("/api/saved-queries", response_model=schemas.SavedQueryListResponse)
+def get_saved_queries(
+    connection_id: Optional[int] = Query(None),
+    category: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    db: Session = Depends(get_db)
+):
+    return storage.get_saved_queries(db, connection_id, category, search, skip, limit)
+
+@app.get("/api/saved-queries/{query_id}", response_model=schemas.SavedQuery)
+def get_saved_query(query_id: int, db: Session = Depends(get_db)):
+    saved_query = storage.get_saved_query(db, query_id)
+    if not saved_query:
+        raise HTTPException(status_code=404, detail="Saved query not found")
+    return saved_query
+
+@app.post("/api/saved-queries", response_model=schemas.SavedQuery)
+def create_saved_query(saved_query: schemas.SavedQueryCreate, db: Session = Depends(get_db)):
+    return storage.create_saved_query(db, saved_query)
+
+@app.put("/api/saved-queries/{query_id}", response_model=schemas.SavedQuery)
+def update_saved_query(query_id: int, saved_query: schemas.SavedQueryUpdate, db: Session = Depends(get_db)):
+    updated_query = storage.update_saved_query(db, query_id, saved_query)
+    if not updated_query:
+        raise HTTPException(status_code=404, detail="Saved query not found")
+    return updated_query
+
+@app.delete("/api/saved-queries/{query_id}")
+def delete_saved_query(query_id: int, db: Session = Depends(get_db)):
+    success = storage.delete_saved_query(db, query_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Saved query not found")
+    return {"message": "Saved query deleted successfully"}
+
+@app.post("/api/saved-queries/{query_id}/toggle-favorite", response_model=schemas.SavedQuery)
+def toggle_saved_query_favorite(query_id: int, db: Session = Depends(get_db)):
+    saved_query = storage.toggle_saved_query_favorite(db, query_id)
+    if not saved_query:
+        raise HTTPException(status_code=404, detail="Saved query not found")
+    return saved_query
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=5000)

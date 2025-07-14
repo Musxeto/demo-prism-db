@@ -138,3 +138,38 @@ class DatabaseRelationships(BaseModel):
     database: str
     tables: List[Dict[str, Any]]
     relationships: List[Dict[str, str]]
+
+# Saved Query Schemas
+class SavedQueryBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    sql: str
+    connection_id: int
+    category: str = "General"
+    tags: Optional[str] = None
+    is_favorite: bool = False
+
+class SavedQueryCreate(SavedQueryBase):
+    pass
+
+class SavedQueryUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    sql: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[str] = None
+    is_favorite: Optional[bool] = None
+
+class SavedQuery(SavedQueryBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {
+        "from_attributes": True,
+    }
+
+class SavedQueryListResponse(BaseModel):
+    queries: List[SavedQuery]
+    total: int
+    categories: List[str]

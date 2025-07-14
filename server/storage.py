@@ -337,3 +337,70 @@ def get_relationships(db: Session, connection_id: int):
         print(f"Error getting relationships: {str(err)}")
         print(traceback.format_exc())
         return {"error": str(err)}
+
+# Saved Queries CRUD operations
+def get_saved_queries(db: Session, connection_id: int = None, category: str = None, search: str = None, skip: int = 0, limit: int = 100):
+    query = db.query(models.SavedQuery)
+    
+    if connection_id:
+        query = query.filter(models.SavedQuery.connection_id == connection_id)
+    
+    if category:
+        query = query.filter(models.SavedQuery.category == category)
+    
+    if search:
+        query = query.filter(models.SavedQuery.name.contains(search) | models.SavedQuery.sql.contains(search))
+    
+    total = query.count()
+    saved_queries = query.order_by(models.SavedQuery.updated_at.desc()).offset(skip).limit(limit).all()
+    
+    # Get all unique categories
+    categories = db.query(models.SavedQuery.category).distinct().all()
+    categories = [cat[0] for cat in categories]
+    
+    return {
+        "queries": saved_queries,
+        "total": total,
+        "categories": categories
+    }
+
+def get_saved_query(db: Session, query_id: int):
+    return db.query(models.SavedQuery).filter(models.SavedQuery.id == query_id).first()
+
+def create_saved_query(db: Session, saved_query: schemas.SavedQueryCreate):
+    db_saved_query = models.SavedQuery(**saved_query.model_dump())
+    db.add(db_saved_query)
+    db.commit()
+    db.refresh(db_saved_query)
+    return db_saved_query
+
+def update_saved_query(db: Session, query_id: int, saved_query: schemas.SavedQueryUpdate):
+    db_saved_query = get_saved_query(db, query_id)
+    if not db_saved_query:
+        return None
+    
+    update_data = saved_query.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_saved_query, field, value)
+    
+    db.commit()
+    db.refresh(db_saved_query)
+    return db_saved_query
+
+def delete_saved_query(db: Session, query_id: int):
+    db_saved_query = get_saved_query(db, query_id)
+    if db_saved_query:
+        db.delete(db_saved_query)
+        db.commit()
+        return True
+    return False
+
+def toggle_saved_query_favorite(db: Session, query_id: int):
+    db_saved_query = get_saved_query(db, query_id)
+    if not db_saved_query:
+        return None
+    
+    db_saved_query.is_favorite = not db_saved_query.is_favorite
+    db.commit()
+    db.refresh(db_saved_query)
+    return db_saved_query
