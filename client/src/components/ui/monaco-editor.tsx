@@ -114,6 +114,7 @@ export default forwardRef<MonacoEditorRef, MonacoEditorProps>(function MonacoEdi
 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
+  const lastValueRef = useRef<string>(value); // Track the last value to prevent unnecessary updates
 
   useImperativeHandle(ref, () => ({
     getEditor: () => editorRef.current,
@@ -180,18 +181,30 @@ export default forwardRef<MonacoEditorRef, MonacoEditorProps>(function MonacoEdi
   }, []);
 
   // Enhanced value sync to ensure the editor always reflects the latest content
+  // but only when there's a real difference to prevent overwriting user input
   useEffect(() => {
-    if (editorRef.current) {
+    if (editorRef.current && value !== undefined && value !== lastValueRef.current) {
       const currentEditorValue = editorRef.current.getValue();
-      // Only update if values are different to prevent cursor jumps
-      if (value !== undefined && currentEditorValue !== value) {
+      // Only update if values are actually different to prevent cursor jumps and content overwrites
+      if (currentEditorValue !== value) {
+        // Save cursor position and selection
+        const position = editorRef.current.getPosition();
+        const selection = editorRef.current.getSelection();
+        
         editorRef.current.setValue(value);
-        // After setting value, preserve the cursor position if possible
+        lastValueRef.current = value; // Update the last value ref
+        
+        // Restore cursor position and selection if they existed
         setTimeout(() => {
-          if (editorRef.current) {
-            editorRef.current.focus();
+          if (editorRef.current && position) {
+            editorRef.current.setPosition(position);
+            if (selection) {
+              editorRef.current.setSelection(selection);
+            }
           }
         }, 0);
+      } else {
+        lastValueRef.current = value; // Update the last value ref even if no editor update was needed
       }
     }
   }, [value]);

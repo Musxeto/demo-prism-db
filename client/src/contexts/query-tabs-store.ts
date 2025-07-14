@@ -40,6 +40,7 @@ interface QueryTabsStore {
   closeAllTabs: () => void;
   saveAllTabs: () => void;
   saveTab: (tabId: string) => void;
+  saveCurrentEditorContent: (tabId: string, content: string) => void;
   
   // Computed getters
   getActiveTab: () => QueryTab | null;
@@ -128,36 +129,7 @@ export const useQueryTabsStore = create<QueryTabsStore>()(
           // First check if the requested tab actually exists
           const targetTab = state.tabs.find(tab => tab.id === tabId);
           
-          // Auto-save current tab before switching, but only if it has actual content
-          const currentTab = state.tabs.find(tab => tab.id === state.activeTabId);
-          if (currentTab && currentTab.hasUnsavedChanges && currentTab.query.trim()) {
-            // Mark the current tab as saved by updating lastExecutedQuery
-            const updatedTabs = state.tabs.map(tab =>
-              tab.id === currentTab.id
-                ? {
-                    ...tab,
-                    lastExecutedQuery: tab.query,
-                    hasUnsavedChanges: false,
-                    updatedAt: new Date(),
-                  }
-                : tab
-            );
-            
-            // Notify about auto-save
-            if (onAutoSave) {
-              onAutoSave(currentTab.name);
-            }
-            
-            // Only set active tab if the tab actually exists
-            if (targetTab) {
-              return { tabs: updatedTabs, activeTabId: tabId };
-            }
-            // If tab doesn't exist, keep current activeTabId or set to first available tab
-            const fallbackTabId = updatedTabs.length > 0 ? updatedTabs[0].id : null;
-            return { tabs: updatedTabs, activeTabId: fallbackTabId };
-          }
-          
-          // No auto-save needed, just switch tabs
+          // Only set active tab if the tab actually exists, no auto-save during tab switching
           if (targetTab) {
             return { activeTabId: tabId };
           }
@@ -351,6 +323,21 @@ export const useQueryTabsStore = create<QueryTabsStore>()(
           };
           return updated;
         });
+      },
+
+      saveCurrentEditorContent: (tabId: string, content: string) => {
+        set((state) => ({
+          tabs: state.tabs.map(tab =>
+            tab.id === tabId
+              ? {
+                  ...tab,
+                  query: content,
+                  updatedAt: new Date(),
+                  hasUnsavedChanges: content !== (tab.lastExecutedQuery || ''),
+                }
+              : tab
+          ),
+        }));
       },
 
       // Computed getters

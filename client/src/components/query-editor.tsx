@@ -11,6 +11,13 @@ import { useToast } from "../hooks/use-toast";
 import { cn } from "../lib/utils";
 import { QuerySafetyDialog } from "./query-safety-dialog";
 
+// Extend Window interface for editor registry
+declare global {
+  interface Window {
+    editorRegistry?: Map<string, () => void>;
+  }
+}
+
 interface QueryEditorProps {
   tab: QueryTab;
   className?: string;
@@ -80,7 +87,31 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
     clearTabError,
     setTabScrollPosition,
     setTabCursorPosition,
+    saveCurrentEditorContent,
   } = useQueryTabsStore();
+
+  // Register this editor globally so tab switching can save content
+  useEffect(() => {
+    const saveContent = () => {
+      if (editorRef.current) {
+        const currentContent = editorRef.current.getValue();
+        saveCurrentEditorContent(tab.id, currentContent);
+      }
+    };
+
+    // Store the save function globally with tab ID
+    if (!window.editorRegistry) {
+      window.editorRegistry = new Map();
+    }
+    window.editorRegistry.set(tab.id, saveContent);
+
+    return () => {
+      // Clean up when component unmounts
+      if (window.editorRegistry) {
+        window.editorRegistry.delete(tab.id);
+      }
+    };
+  }, [tab.id, saveCurrentEditorContent]);
 
   // Detect dangerous and multi-statement queries
   const analyzeQuery = (sql: string) => {
@@ -334,31 +365,22 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
   // Handle editor content change
   const handleEditorChange = useCallback((value: string | undefined) => {
     const newQuery = value || '';
-    // Immediately update the tab query
-    updateTabQuery(tab.id, newQuery);
-  }, [tab.id, updateTabQuery]);
+    // Only update the tab query if it's actually different
+    if (newQuery !== tab.query) {
+      updateTabQuery(tab.id, newQuery);
+    }
+  }, [tab.id, tab.query, updateTabQuery]);
 
-  // Sync editor content when tab changes
+  // Sync editor content when tab changes - this is the main sync effect
   useEffect(() => {
     if (editorRef.current) {
-      const currentValue = editorRef.current.getValue();
-      // Only update if the values are different to avoid infinite loops
-      if (currentValue !== tab.query) {
-        editorRef.current.setValue(tab.query || '');
-      }
+      // When switching tabs, always set the editor to the tab's current query
+      // This ensures we get the latest content for this specific tab
+      editorRef.current.setValue(tab.query || '');
+      // Focus the editor when switching tabs
+      editorRef.current.focus();
     }
   }, [tab.id]); // Only depend on tab.id to sync when switching tabs
-
-  // Separate effect to handle query content updates
-  useEffect(() => {
-    if (editorRef.current) {
-      const currentValue = editorRef.current.getValue();
-      // If the tab query changed externally, update the editor
-      if (currentValue !== tab.query) {
-        editorRef.current.setValue(tab.query || '');
-      }
-    }
-  }, [tab.query]);
 
   // Listen for custom execute query events from Monaco
   useEffect(() => {
@@ -371,30 +393,6 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
       window.removeEventListener('executeQuery', handleExecuteQueryEvent);
     };
   }, [handleExecuteQuery]);
-
-  // Force sync editor content to tab state when tab becomes active
-  useEffect(() => {
-    if (editorRef.current) {
-      // Get current editor content and sync it to the tab
-      const currentValue = editorRef.current.getValue();
-      if (currentValue !== tab.query) {
-        // Always update the tab query to match editor content
-        updateTabQuery(tab.id, currentValue);
-      }
-      // Focus the editor
-      editorRef.current.focus();
-    }
-  }, [tab.id, updateTabQuery]);
-
-  // Also force sync when the component mounts
-  useEffect(() => {
-    if (editorRef.current) {
-      const currentValue = editorRef.current.getValue();
-      if (currentValue && currentValue !== tab.query) {
-        updateTabQuery(tab.id, currentValue);
-      }
-    }
-  }, []);
 
   // Show error popup when tab.error changes
   useEffect(() => {

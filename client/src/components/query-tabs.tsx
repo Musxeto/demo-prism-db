@@ -20,6 +20,13 @@ import { cn } from '../lib/utils';
 import { useToast } from '../hooks/use-toast';
 import { logAction } from '../lib/api';
 
+// Extend Window interface for editor registry
+declare global {
+  interface Window {
+    editorRegistry?: Map<string, () => void>;
+  }
+}
+
 interface QueryTabsProps {
   defaultConnectionId?: number;
 }
@@ -76,16 +83,18 @@ export function QueryTabs({ defaultConnectionId }: QueryTabsProps) {
   };
 
   const handleTabClick = (tabId: string) => {
+    // Save current editor content before switching tabs
+    if (activeTabId && window.editorRegistry?.has(activeTabId)) {
+      const saveCurrentEditor = window.editorRegistry.get(activeTabId);
+      if (saveCurrentEditor) {
+        saveCurrentEditor();
+      }
+    }
+
     if (activeTabId !== tabId) {
       logAction('switch_tab', { fromTabId: activeTabId, toTabId: tabId });
     }
-    setActiveTab(tabId, (tabName: string) => {
-      toast({
-        title: "Tab auto-saved",
-        description: `"${tabName}" was automatically saved`,
-        duration: 2000,
-      });
-    });
+    setActiveTab(tabId);
   };
 
   const handleUpdateTabName = (tabId: string, newName: string) => {
