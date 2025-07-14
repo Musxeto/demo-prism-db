@@ -50,6 +50,17 @@ export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryCl
   const { addTab } = useQueryTabsStore();
   const [openTables, setOpenTables] = useState<Set<string>>(new Set());
 
+  // Fetch connection details to check database type
+  const { data: connection } = useQuery({
+    queryKey: ["connection", connectionId],
+    queryFn: async () => {
+      const response = await fetch(`/api/connections/${connectionId}`);
+      if (!response.ok) throw new Error("Failed to fetch connection");
+      return response.json();
+    },
+    enabled: !!connectionId,
+  });
+
   const { data: schema, isLoading, refetch, error } = useQuery<DatabaseSchema>({
     queryKey: ["schema", connectionId],
     queryFn: async () => {
@@ -81,9 +92,18 @@ export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryCl
   };
 
   const handleSelectFromTable = (tableName: string) => {
-    // Check if this is a MongoDB collection
-    const table = schema?.tables.find(t => getTableName(t) === tableName);
-    const isMongoDB = table && typeof table === 'object' && 'isMongoDB' in table && table.isMongoDB === true;
+    // Debug: Log the connection object to see its structure
+    console.log("Connection object:", connection);
+    console.log("Connection databaseType:", connection?.databaseType);
+    console.log("Connection database_type:", connection?.database_type);
+    
+    // Check if this is a MongoDB connection - try multiple property names
+    const isMongoDB = connection?.databaseType === 'mongodb' || 
+                     connection?.database_type === 'mongodb' ||
+                     connection?.databaseType === 'mongo' || 
+                     connection?.database_type === 'mongo';
+    
+    console.log("Is MongoDB:", isMongoDB);
     
     const query = isMongoDB 
       ? `db.${tableName}.find({})`  // MongoDB query
@@ -97,12 +117,19 @@ export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryCl
   };
 
   const handleDescribeTable = (tableName: string) => {
-    // Check if this is a MongoDB collection
-    const table = schema?.tables.find(t => getTableName(t) === tableName);
-    const isMongoDB = table && typeof table === 'object' && 'isMongoDB' in table && table.isMongoDB === true;
+    // Check if this is a MongoDB connection
+    const isMongoDB = connection?.databaseType === 'mongodb' || connection?.database_type === 'mongodb';
     
     const query = isMongoDB
-      ? `// Collection: ${tableName}\n// Sample document structure shown in schema browser`
+      ? `// Collection: ${tableName}
+// Get sample document structure
+db.${tableName}.findOne()
+
+// Alternative: Get collection statistics
+// db.${tableName}.stats()
+
+// Get index information
+// db.${tableName}.getIndexes()`
       : `DESCRIBE ${tableName};`;
       
     addTab(connectionId, query, `Describe ${tableName}`);
@@ -113,13 +140,20 @@ export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryCl
   };
 
   const handleShowCreateTable = (tableName: string) => {
-    // Check if this is a MongoDB collection
-    const table = schema?.tables.find(t => getTableName(t) === tableName);
-    const isMongoDB = table && typeof table === 'object' && 'isMongoDB' in table && table.isMongoDB === true;
+    // Check if this is a MongoDB connection
+    const isMongoDB = connection?.databaseType === 'mongodb' || connection?.database_type === 'mongodb';
     
     if (isMongoDB) {
-      // For MongoDB, show collection stats or indexes
-      const query = `// MongoDB Collection: ${tableName}\n// Use db.${tableName}.getIndexes() to view indexes\n// Use db.${tableName}.stats() to view collection stats`;
+      // For MongoDB, show collection stats and indexes
+      const query = `// MongoDB Collection: ${tableName}
+// Collection statistics
+db.${tableName}.stats()
+
+// Index information
+db.${tableName}.getIndexes()
+
+// Count documents
+db.${tableName}.countDocuments()`;
       addTab(connectionId, query, `Info ${tableName}`);
       toast({
         title: "Collection info opened",
@@ -296,13 +330,13 @@ export function SchemaBrowserWithTabs({ connectionId, className, onViewHistoryCl
               <Database className="w-4 h-4 mr-2 text-slate-500" />
               {schema.name || 'Database'}
               <span className="ml-auto text-xs text-slate-400">
-                {schema.tables.length} {schema.tables.some(t => typeof t === 'object' && 'isMongoDB' in t && t.isMongoDB === true) ? 'items' : 'tables'}
+                {schema.tables.length} {(connection?.databaseType === 'mongodb' || connection?.database_type === 'mongodb') ? 'collections' : 'tables'}
               </span>
             </CollapsibleTrigger>
             <CollapsibleContent className="ml-8 mt-1 space-y-1">
               {schema.tables && schema.tables.map((table) => {
                 const tableName = getTableName(table);
-                const isMongoDB = table && typeof table === 'object' && 'isMongoDB' in table && table.isMongoDB === true;
+                const isMongoDB = connection?.databaseType === 'mongodb' || connection?.database_type === 'mongodb';
                 return (
                   <Collapsible
                     key={`table-${tableName}`}
