@@ -33,6 +33,13 @@ app.add_middleware(
 def read_connections(db: Session = Depends(get_db)):
     return storage.get_connections(db)
 
+@app.get("/api/connections/{connection_id}", response_model=schemas.Connection)
+def read_connection(connection_id: int, db: Session = Depends(get_db)):
+    db_connection = storage.get_connection(db=db, connection_id=connection_id)
+    if db_connection is None:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    return db_connection
+
 @app.post("/api/connections", response_model=schemas.Connection)
 def create_connection(connection: schemas.ConnectionCreate, db: Session = Depends(get_db)):
     return storage.create_connection(db=db, connection=connection)

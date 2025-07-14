@@ -1584,7 +1584,7 @@ class MongoDBConnector(DatabaseConnector):
             return False, f"Connection failed: {str(err)}"
     
     def execute_query(self, query: str) -> Dict[str, Any]:
-        """Execute MongoDB query (JavaScript-like syntax)"""
+        """Execute MongoDB query (Native MongoDB syntax)"""
         start_time = __import__('time').time()
         result = {
             "type": "error",
@@ -1596,49 +1596,41 @@ class MongoDBConnector(DatabaseConnector):
             conn = self.connect()
             db = self.database
             
-            # Parse MongoDB query - this is a simplified parser
-            # In a real implementation, you'd want a more robust parser
+            # Parse MongoDB query - supports native MongoDB operations
             query = query.strip()
             
-            # Simple pattern matching for common MongoDB operations
+            # Handle different MongoDB operations
             if query.startswith("db.") and ".find(" in query:
-                # Extract collection name and find parameters
-                parts = query.split(".")
-                if len(parts) >= 3:
-                    collection_name = parts[1]
-                    collection = db[collection_name]
-                    
-                    # Execute find operation
-                    try:
-                        cursor = collection.find().limit(100)  # Limit results
-                        documents = list(cursor)
-                        
-                        # Convert ObjectId to string for JSON serialization
-                        for doc in documents:
-                            if '_id' in doc:
-                                doc['_id'] = str(doc['_id'])
-                        
-                        result.update({
-                            "type": "select",
-                            "columns": [{"name": "document", "type": "BSON"}],
-                            "rows": [[doc] for doc in documents],
-                            "rowCount": len(documents),
-                        })
-                    except Exception as e:
-                        result.update({
-                            "message": f"Query execution error: {str(e)}",
-                        })
-                        
-            elif query.startswith("db.") and (".insertOne(" in query or ".insertMany(" in query):
-                result.update({
-                    "type": "write",
-                    "affectedRows": 1,
-                    "message": "Insert operation (parsing not fully implemented)"
-                })
-                
+                result = self._execute_find_query(db, query, start_time)
+            elif query.startswith("db.") and ".insertOne(" in query:
+                result = self._execute_insert_one_query(db, query, start_time)
+            elif query.startswith("db.") and ".insertMany(" in query:
+                result = self._execute_insert_many_query(db, query, start_time)
+            elif query.startswith("db.") and ".updateOne(" in query:
+                result = self._execute_update_one_query(db, query, start_time)
+            elif query.startswith("db.") and ".updateMany(" in query:
+                result = self._execute_update_many_query(db, query, start_time)
+            elif query.startswith("db.") and ".deleteOne(" in query:
+                result = self._execute_delete_one_query(db, query, start_time)
+            elif query.startswith("db.") and ".deleteMany(" in query:
+                result = self._execute_delete_many_query(db, query, start_time)
+            elif query.startswith("db.") and ".aggregate(" in query:
+                result = self._execute_aggregate_query(db, query, start_time)
+            elif query.startswith("show "):
+                result = self._execute_show_command(db, query, start_time)
             else:
                 result.update({
-                    "message": "Unsupported MongoDB query format. Use standard MongoDB syntax like db.collection.find()"
+                    "message": "Unsupported MongoDB query format. Supported operations:\n"
+                             "• db.collection.find({})\n"
+                             "• db.collection.insertOne({})\n"
+                             "• db.collection.insertMany([])\n"
+                             "• db.collection.updateOne({}, {})\n"
+                             "• db.collection.updateMany({}, {})\n"
+                             "• db.collection.deleteOne({})\n"
+                             "• db.collection.deleteMany({})\n"
+                             "• db.collection.aggregate([])\n"
+                             "• show collections\n"
+                             "• show dbs"
                 })
                 
             result["executionTimeMs"] = (__import__('time').time() - start_time) * 1000
@@ -1647,6 +1639,12 @@ class MongoDBConnector(DatabaseConnector):
         except pymongo.errors.PyMongoError as err:
             result.update({
                 "message": str(err),
+                "executionTimeMs": (__import__('time').time() - start_time) * 1000
+            })
+            return result
+        except Exception as err:
+            result.update({
+                "message": f"Query execution error: {str(err)}",
                 "executionTimeMs": (__import__('time').time() - start_time) * 1000
             })
             return result
@@ -1734,6 +1732,367 @@ class MongoDBConnector(DatabaseConnector):
             
         except pymongo.errors.PyMongoError as err:
             return {"error": str(err)}
+    
+    def _parse_collection_and_operation(self, query: str):
+        """Extract collection name from MongoDB query"""
+        parts = query.split(".")
+        if len(parts) >= 3:
+            return parts[1]  # collection name
+        return None
+    
+    def _parse_json_from_query(self, query: str, operation: str):
+        """Extract JSON parameters from MongoDB query"""
+        import re
+        import json
+        
+        # Find the operation and extract parameters
+        pattern = rf"{operation}\((.*)\)"
+        match = re.search(pattern, query, re.DOTALL)
+        if match:
+            params_str = match.group(1).strip()
+            try:
+                # Handle different parameter formats
+                if operation in ["find", "deleteOne", "deleteMany"]:
+                    # Single parameter queries
+                    if params_str == "" or params_str == "{}":
+                        return {}
+                    return json.loads(params_str)
+                elif operation in ["insertOne"]:
+                    # Single document insert
+                    return json.loads(params_str)
+                elif operation in ["insertMany"]:
+                    # Multiple documents insert
+                    return json.loads(params_str)
+                elif operation in ["updateOne", "updateMany"]:
+                    # Two parameter operations (filter, update)
+                    # Split by comma but handle nested objects
+                    params = self._split_json_params(params_str)
+                    if len(params) >= 2:
+                        return {
+                            "filter": json.loads(params[0].strip()),
+                            "update": json.loads(params[1].strip())
+                        }
+                elif operation == "aggregate":
+                    # Aggregation pipeline
+                    return json.loads(params_str)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in query: {str(e)}")
+        return None
+    
+    def _split_json_params(self, params_str: str):
+        """Split parameters while respecting JSON object boundaries"""
+        params = []
+        current_param = ""
+        brace_count = 0
+        bracket_count = 0
+        in_string = False
+        escape_next = False
+        
+        for char in params_str:
+            if escape_next:
+                escape_next = False
+            elif char == '\\':
+                escape_next = True
+            elif char == '"' and not escape_next:
+                in_string = not in_string
+            elif not in_string:
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                elif char == '[':
+                    bracket_count += 1
+                elif char == ']':
+                    bracket_count -= 1
+                elif char == ',' and brace_count == 0 and bracket_count == 0:
+                    params.append(current_param)
+                    current_param = ""
+                    continue
+            
+            current_param += char
+        
+        if current_param.strip():
+            params.append(current_param)
+        
+        return params
+    
+    def _convert_objectid_in_result(self, data):
+        """Convert ObjectId objects to strings for JSON serialization"""
+        if isinstance(data, dict):
+            result = {}
+            for key, value in data.items():
+                if isinstance(value, ObjectId):
+                    result[key] = str(value)
+                elif isinstance(value, (dict, list)):
+                    result[key] = self._convert_objectid_in_result(value)
+                else:
+                    result[key] = value
+            return result
+        elif isinstance(data, list):
+            return [self._convert_objectid_in_result(item) for item in data]
+        elif isinstance(data, ObjectId):
+            return str(data)
+        else:
+            return data
+    
+    def _execute_find_query(self, db, query: str, start_time: float):
+        """Execute MongoDB find query"""
+        collection_name = self._parse_collection_and_operation(query)
+        if not collection_name:
+            return {"message": "Invalid collection name in query"}
+        
+        collection = db[collection_name]
+        
+        try:
+            # Parse find parameters
+            find_params = self._parse_json_from_query(query, "find")
+            if find_params is None:
+                find_params = {}
+            
+            # Execute find operation with limit for safety
+            cursor = collection.find(find_params).limit(100)
+            documents = list(cursor)
+            
+            # Convert ObjectId to string for JSON serialization
+            documents = self._convert_objectid_in_result(documents)
+            
+            # Get column names from documents
+            columns = []
+            if documents:
+                all_fields = set()
+                for doc in documents:
+                    all_fields.update(doc.keys())
+                
+                for field in sorted(all_fields):
+                    columns.append({"name": field, "type": "Mixed"})
+            
+            return {
+                "type": "select",
+                "columns": columns,
+                "rows": [list(doc.values()) if isinstance(doc, dict) else [doc] for doc in documents],
+                "rowCount": len(documents),
+            }
+        except Exception as e:
+            return {"message": f"Find operation failed: {str(e)}"}
+    
+    def _execute_insert_one_query(self, db, query: str, start_time: float):
+        """Execute MongoDB insertOne query"""
+        collection_name = self._parse_collection_and_operation(query)
+        if not collection_name:
+            return {"message": "Invalid collection name in query"}
+        
+        collection = db[collection_name]
+        
+        try:
+            # Parse insert parameters
+            document = self._parse_json_from_query(query, "insertOne")
+            if not document:
+                return {"message": "No document provided for insertion"}
+            
+            # Execute insert operation
+            result = collection.insert_one(document)
+            
+            return {
+                "type": "write",
+                "affectedRows": 1,
+                "message": f"Document inserted with _id: {str(result.inserted_id)}"
+            }
+        except Exception as e:
+            return {"message": f"Insert operation failed: {str(e)}"}
+    
+    def _execute_insert_many_query(self, db, query: str, start_time: float):
+        """Execute MongoDB insertMany query"""
+        collection_name = self._parse_collection_and_operation(query)
+        if not collection_name:
+            return {"message": "Invalid collection name in query"}
+        
+        collection = db[collection_name]
+        
+        try:
+            # Parse insert parameters
+            documents = self._parse_json_from_query(query, "insertMany")
+            if not documents or not isinstance(documents, list):
+                return {"message": "No documents array provided for insertion"}
+            
+            # Execute insert operation
+            result = collection.insert_many(documents)
+            
+            return {
+                "type": "write",
+                "affectedRows": len(result.inserted_ids),
+                "message": f"{len(result.inserted_ids)} documents inserted"
+            }
+        except Exception as e:
+            return {"message": f"Insert many operation failed: {str(e)}"}
+    
+    def _execute_update_one_query(self, db, query: str, start_time: float):
+        """Execute MongoDB updateOne query"""
+        collection_name = self._parse_collection_and_operation(query)
+        if not collection_name:
+            return {"message": "Invalid collection name in query"}
+        
+        collection = db[collection_name]
+        
+        try:
+            # Parse update parameters
+            params = self._parse_json_from_query(query, "updateOne")
+            if not params or "filter" not in params or "update" not in params:
+                return {"message": "Invalid updateOne parameters. Expected: updateOne(filter, update)"}
+            
+            # Execute update operation
+            result = collection.update_one(params["filter"], params["update"])
+            
+            return {
+                "type": "write",
+                "affectedRows": result.modified_count,
+                "message": f"Matched: {result.matched_count}, Modified: {result.modified_count}"
+            }
+        except Exception as e:
+            return {"message": f"Update one operation failed: {str(e)}"}
+    
+    def _execute_update_many_query(self, db, query: str, start_time: float):
+        """Execute MongoDB updateMany query"""
+        collection_name = self._parse_collection_and_operation(query)
+        if not collection_name:
+            return {"message": "Invalid collection name in query"}
+        
+        collection = db[collection_name]
+        
+        try:
+            # Parse update parameters
+            params = self._parse_json_from_query(query, "updateMany")
+            if not params or "filter" not in params or "update" not in params:
+                return {"message": "Invalid updateMany parameters. Expected: updateMany(filter, update)"}
+            
+            # Execute update operation
+            result = collection.update_many(params["filter"], params["update"])
+            
+            return {
+                "type": "write",
+                "affectedRows": result.modified_count,
+                "message": f"Matched: {result.matched_count}, Modified: {result.modified_count}"
+            }
+        except Exception as e:
+            return {"message": f"Update many operation failed: {str(e)}"}
+    
+    def _execute_delete_one_query(self, db, query: str, start_time: float):
+        """Execute MongoDB deleteOne query"""
+        collection_name = self._parse_collection_and_operation(query)
+        if not collection_name:
+            return {"message": "Invalid collection name in query"}
+        
+        collection = db[collection_name]
+        
+        try:
+            # Parse delete parameters
+            filter_doc = self._parse_json_from_query(query, "deleteOne")
+            if filter_doc is None:
+                filter_doc = {}
+            
+            # Execute delete operation
+            result = collection.delete_one(filter_doc)
+            
+            return {
+                "type": "write",
+                "affectedRows": result.deleted_count,
+                "message": f"{result.deleted_count} document deleted"
+            }
+        except Exception as e:
+            return {"message": f"Delete one operation failed: {str(e)}"}
+    
+    def _execute_delete_many_query(self, db, query: str, start_time: float):
+        """Execute MongoDB deleteMany query"""
+        collection_name = self._parse_collection_and_operation(query)
+        if not collection_name:
+            return {"message": "Invalid collection name in query"}
+        
+        collection = db[collection_name]
+        
+        try:
+            # Parse delete parameters
+            filter_doc = self._parse_json_from_query(query, "deleteMany")
+            if filter_doc is None:
+                filter_doc = {}
+            
+            # Execute delete operation
+            result = collection.delete_many(filter_doc)
+            
+            return {
+                "type": "write",
+                "affectedRows": result.deleted_count,
+                "message": f"{result.deleted_count} documents deleted"
+            }
+        except Exception as e:
+            return {"message": f"Delete many operation failed: {str(e)}"}
+    
+    def _execute_aggregate_query(self, db, query: str, start_time: float):
+        """Execute MongoDB aggregate query"""
+        collection_name = self._parse_collection_and_operation(query)
+        if not collection_name:
+            return {"message": "Invalid collection name in query"}
+        
+        collection = db[collection_name]
+        
+        try:
+            # Parse aggregation pipeline
+            pipeline = self._parse_json_from_query(query, "aggregate")
+            if not pipeline or not isinstance(pipeline, list):
+                return {"message": "Invalid aggregation pipeline. Expected array of stages."}
+            
+            # Execute aggregation
+            cursor = collection.aggregate(pipeline)
+            documents = list(cursor)
+            
+            # Convert ObjectId to string for JSON serialization
+            documents = self._convert_objectid_in_result(documents)
+            
+            # Get column names from documents
+            columns = []
+            if documents:
+                all_fields = set()
+                for doc in documents:
+                    if isinstance(doc, dict):
+                        all_fields.update(doc.keys())
+                
+                for field in sorted(all_fields):
+                    columns.append({"name": field, "type": "Mixed"})
+            
+            return {
+                "type": "select",
+                "columns": columns,
+                "rows": [list(doc.values()) if isinstance(doc, dict) else [doc] for doc in documents],
+                "rowCount": len(documents),
+            }
+        except Exception as e:
+            return {"message": f"Aggregation operation failed: {str(e)}"}
+    
+    def _execute_show_command(self, db, query: str, start_time: float):
+        """Execute MongoDB show commands"""
+        query = query.lower().strip()
+        
+        try:
+            if query == "show collections":
+                collections = db.list_collection_names()
+                return {
+                    "type": "select",
+                    "columns": [{"name": "collections", "type": "String"}],
+                    "rows": [[collection] for collection in collections],
+                    "rowCount": len(collections),
+                }
+            elif query == "show dbs":
+                # Get database names
+                client = db.client
+                db_names = client.list_database_names()
+                return {
+                    "type": "select",
+                    "columns": [{"name": "databases", "type": "String"}],
+                    "rows": [[db_name] for db_name in db_names],
+                    "rowCount": len(db_names),
+                }
+            else:
+                return {"message": "Unsupported show command. Available: 'show collections', 'show dbs'"}
+        except Exception as e:
+            return {"message": f"Show command failed: {str(e)}"}
     
     def get_table_info(self, collection_name: str) -> Dict[str, Any]:
         """Get detailed information about a specific MongoDB collection"""

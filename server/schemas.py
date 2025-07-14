@@ -9,7 +9,7 @@ class ConnectionBase(BaseModel):
     database: str
     username: str
     password: str
-    databaseType: Optional[str] = "mysql"  # Default to MySQL if not specified
+    databaseType: Optional[str] = Field(default="mysql", alias="database_type")  # Map database_type to databaseType
 
 class ConnectionCreate(ConnectionBase):
     pass
@@ -33,13 +33,16 @@ class Connection(ConnectionBase):
         "from_attributes": True,
     }
     
-    # For debugging purposes
-    def __init__(self, **data):
-        super().__init__(**data)
-        print(f"Connection model init with data: {data}")
-        if 'database_type' in data:
-            print(f"Setting databaseType={data['database_type']} from database_type")
-            self.databaseType = data['database_type']
+    @classmethod
+    def model_validate(cls, obj, **kwargs):
+        # Handle snake_case to camelCase conversion for database_type
+        if hasattr(obj, 'database_type') and obj.database_type:
+            # Create a dict from the object and map database_type to databaseType
+            if hasattr(obj, '__dict__'):
+                data = obj.__dict__.copy()
+                data['databaseType'] = data.get('database_type', data.get('databaseType', 'mysql'))
+                return super().model_validate(data, **kwargs)
+        return super().model_validate(obj, **kwargs)
 
 class QueryBase(BaseModel):
     sql: str
