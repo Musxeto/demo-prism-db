@@ -23,6 +23,19 @@ export const queries = pgTable("queries", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const savedQueries = pgTable("saved_queries", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  sql: text("sql").notNull(),
+  connection_id: integer("connection_id").references(() => connections.id),
+  category: text("category"),
+  tags: text("tags"), // JSON string of tags array
+  is_favorite: boolean("is_favorite").notNull().default(false),
+  created_at: timestamp("created_at").notNull().defaultNow(),
+  updated_at: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const insertConnectionSchema = createInsertSchema(connections).omit({
   id: true,
   createdAt: true,
@@ -33,10 +46,18 @@ export const insertQuerySchema = createInsertSchema(queries).omit({
   createdAt: true,
 });
 
+export const insertSavedQuerySchema = createInsertSchema(savedQueries).omit({
+  id: true,
+  created_at: true,
+  updated_at: true,
+});
+
 export type InsertConnection = z.infer<typeof insertConnectionSchema>;
 export type Connection = typeof connections.$inferSelect;
 export type InsertQuery = z.infer<typeof insertQuerySchema>;
 export type Query = typeof queries.$inferSelect;
+export type InsertSavedQuery = z.infer<typeof insertSavedQuerySchema>;
+export type SavedQuery = typeof savedQueries.$inferSelect;
 
 // Schema introspection types
 export interface DatabaseSchema {

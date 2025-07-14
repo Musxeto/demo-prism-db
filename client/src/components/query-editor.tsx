@@ -4,12 +4,14 @@ import { QueryResult } from "../../../shared/schema";
 import { useQueryTabsStore, QueryTab } from "../contexts/query-tabs-store";
 import { useConnection } from "../hooks/use-connections";
 import { Button } from "./ui/button";
-import { Play, Loader2, AlertCircle, Clock, Shield, FileText, X, AlertTriangle } from "lucide-react";
+import { Play, Loader2, AlertCircle, Clock, Shield, FileText, X, AlertTriangle, BookmarkPlus } from "lucide-react";
 import MonacoEditor, { MonacoEditorRef } from "./ui/monaco-editor";
 import { apiRequest } from "../lib/queryClient";
 import { useToast } from "../hooks/use-toast";
 import { cn } from "../lib/utils";
 import { QuerySafetyDialog } from "./query-safety-dialog";
+import { SavedQueryModal } from "./saved-query-modal";
+import { savedQueriesAPI } from "../lib/saved-queries-api";
 
 // Extend Window interface for editor registry
 declare global {
@@ -27,6 +29,7 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
   const { toast } = useToast();
   const editorRef = useRef<MonacoEditorRef>(null);
   const [showSafetyDialog, setShowSafetyDialog] = useState(false);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [pendingQueryOptions, setPendingQueryOptions] = useState<{
     sql: string;
     page?: number;
@@ -344,6 +347,28 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
     });
   }, [tab.connectionId, tab.id, executeQueryMutation, clearTabError, setTabExecuting]);
 
+  const handleSaveQuery = useCallback(async (queryData: any) => {
+    try {
+      await savedQueriesAPI.createQuery({
+        ...queryData,
+        connection_id: tab.connectionId
+      });
+      setShowSaveDialog(false);
+      toast({
+        title: "Query Saved",
+        description: `Successfully saved query "${queryData.name}"`,
+        duration: 3000,
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to save query",
+        duration: 5000,
+      });
+    }
+  }, [tab.query, tab.connectionId, toast]);
+
   const handleSafetyConfirm = useCallback((safetyOptions: { 
     allowMultiple?: boolean; 
     confirmDangerous?: boolean 
@@ -430,6 +455,17 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
               <Play className="h-4 w-4" />
             )}
             {tab.isExecuting ? "Executing..." : "Run Query"}
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!tab.query.trim()}
+            onClick={() => setShowSaveDialog(true)}
+            className="flex items-center gap-1"
+          >
+            <BookmarkPlus className="h-4 w-4" />
+            Save
           </Button>
 
           {/* Safety indicators */}
@@ -519,6 +555,18 @@ export default function QueryEditor({ tab, className }: QueryEditorProps) {
           title={showErrorPopup.title}
           description={showErrorPopup.description}
           onClose={closeErrorPopup}
+        />
+      )}
+
+      {/* Save Query Modal */}
+      {showSaveDialog && (
+        <SavedQueryModal
+          initialData={{
+            sql: tab.query,
+            connection_id: tab.connectionId
+          }}
+          onSave={handleSaveQuery}
+          onClose={() => setShowSaveDialog(false)}
         />
       )}
     </div>

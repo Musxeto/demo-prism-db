@@ -427,10 +427,10 @@ db.${tableName}.countDocuments()`;
       {/* Footer Actions */}
       <div className="p-4 border-t border-slate-200 mt-auto">
         <div className="space-y-2">
-          <Button variant="ghost" className="w-full justify-start text-sm text-slate-600">
+          {/* <Button variant="ghost" className="w-full justify-start text-sm text-slate-600">
             <Settings className="w-4 h-4 mr-3" />
             Connection Settings
-          </Button>
+          </Button> */}
         </div>
       </div>
     </div>

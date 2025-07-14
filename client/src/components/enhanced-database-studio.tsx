@@ -22,9 +22,11 @@ import {
   Minimize2,
   AlertCircle,
   RefreshCw,
-  History // Import History icon
+  History, // Import History icon
+  BookOpen // Import BookOpen icon for saved queries
 } from 'lucide-react';
 import { QueryHistoryModal } from './query-history-modal'; // Import the modal
+import { SavedQueriesPanel } from './saved-queries-panel'; // Import saved queries panel
 
 type ViewMode = 'query' | 'erd';
 
@@ -38,6 +40,7 @@ export function EnhancedDatabaseStudio() {
   const [connectionToDelete, setConnectionToDelete] = useState<Connection | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('query');
   const [isSchemaCollapsed, setIsSchemaCollapsed] = useState(false);
+  const [isSavedQueriesCollapsed, setIsSavedQueriesCollapsed] = useState(false);
   
   const { tabs, activeTabId, hasUnsavedChanges, closeAllTabs, addTab } = useQueryTabsStore();
 
@@ -71,8 +74,24 @@ export function EnhancedDatabaseStudio() {
     setIsHistoryModalOpen(false);
   };
 
+  const handleSavedQuerySelect = (query: any) => {
+    if (selectedConnectionId) {
+      addTab(selectedConnectionId, query.sql, query.name);
+    }
+  };
+
+  const handleSavedQueryRun = (query: any) => {
+    if (selectedConnectionId) {
+      const newTabId = addTab(selectedConnectionId, query.name, query.sql);
+    }
+  };
+
   const toggleSchemaPanel = () => {
     setIsSchemaCollapsed(!isSchemaCollapsed);
+  };
+
+  const toggleSavedQueriesPanel = () => {
+    setIsSavedQueriesCollapsed(!isSavedQueriesCollapsed);
   };
 
   const handleSettingsClick = (connection: Connection) => {
@@ -193,6 +212,17 @@ export function EnhancedDatabaseStudio() {
             {isSchemaCollapsed ? 'Show' : 'Hide'} Schema
           </Button>
 
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={toggleSavedQueriesPanel}
+            className="gap-2"
+          >
+            {isSavedQueriesCollapsed ? <Maximize2 className="h-4 w-4" /> : <Minimize2 className="h-4 w-4" />}
+            <BookOpen className="h-4 w-4" />
+            {isSavedQueriesCollapsed ? 'Show' : 'Hide'} Saved Queries
+          </Button>
+
           <Button onClick={() => setIsConnectionModalOpen(true)} size="sm" variant="outline">
             <Plus className="h-4 w-4 mr-2" />
             Connection
@@ -243,13 +273,32 @@ export function EnhancedDatabaseStudio() {
             )}
 
             {/* Main Content Panel */}
-            <ResizablePanel defaultSize={isSchemaCollapsed ? 100 : 75}>
+            <ResizablePanel 
+              defaultSize={
+                isSchemaCollapsed && isSavedQueriesCollapsed ? 100 :
+                isSchemaCollapsed || isSavedQueriesCollapsed ? 75 : 50
+              }
+            >
               {viewMode === 'query' ? (
                 <MultiTabQueryStudio connectionId={selectedConnectionId} />
               ) : (
                 selectedConnectionId && <ERDViewer connectionId={selectedConnectionId} />
               )}
             </ResizablePanel>
+
+            {/* Saved Queries Panel */}
+            {!isSavedQueriesCollapsed && (
+              <>
+                <ResizableHandle />
+                <ResizablePanel defaultSize={25} minSize={15} maxSize={40}>
+                  <SavedQueriesPanel 
+                    connectionId={selectedConnectionId}
+                    onQuerySelect={handleSavedQuerySelect}
+                    onQueryRun={handleSavedQueryRun}
+                  />
+                </ResizablePanel>
+              </>
+            )}
           </ResizablePanelGroup>
         </div>
       )}
