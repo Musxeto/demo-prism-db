@@ -187,7 +187,6 @@ def get_action_logs() -> List[dict]:
         cur.execute('SELECT * FROM action_logs ORDER BY created_at DESC LIMIT 100')
         return cur.fetchall()
 
-# Saved Queries API endpoints
 @app.get("/api/saved-queries", response_model=schemas.SavedQueryListResponse)
 def get_saved_queries(
     connection_id: Optional[int] = Query(None),
